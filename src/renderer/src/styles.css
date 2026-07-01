@@ -161,6 +161,23 @@ button {
   padding-bottom: 16px;
 }
 
+.resizer {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s;
+}
+
+.resizer:hover,
+body.resizing .resizer {
+  background: var(--accent-dim);
+}
+
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
 .side-section {
   margin-top: 6px;
 }
@@ -618,6 +635,13 @@ button {
   font-size: 12px;
 }
 
+.commit-box .commit-opts {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
 /* ---------- Diff viewer ---------- */
 .diff {
   flex: 1;
@@ -652,6 +676,14 @@ button {
   color: var(--cyan);
   background: var(--panel);
   padding: 2px 0;
+  align-items: center;
+}
+
+.hunk-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 0 8px;
 }
 
 .diff-line {
@@ -690,6 +722,26 @@ button {
 }
 .diff-line.meta .content {
   color: var(--text-dim);
+}
+
+.diff-line .sign {
+  position: sticky;
+  right: 0;
+  flex: 0 0 20px;
+  text-align: center;
+  font-weight: 700;
+  user-select: none;
+  color: var(--text-dim);
+  background: var(--bg);
+  border-left: 1px solid var(--border-soft);
+}
+.diff-line.add .sign {
+  color: var(--green);
+  background: var(--add-gutter);
+}
+.diff-line.del .sign {
+  color: var(--red);
+  background: var(--del-gutter);
 }
 
 /* ---------- Generic buttons ---------- */
@@ -765,6 +817,21 @@ button {
   flex: 1;
   white-space: pre-wrap;
   font-family: var(--mono);
+  user-select: text;
+  cursor: text;
+}
+
+.error-bar .copy-btn {
+  flex-shrink: 0;
+  border: 1px solid #f3b3b8;
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-family: var(--sans);
+}
+
+.error-bar .copy-btn:hover {
+  background: rgba(243, 179, 184, 0.15);
 }
 
 .error-bar button {
@@ -986,8 +1053,9 @@ button {
 
 .chevron {
   display: inline-block;
-  width: 9px;
-  font-size: 9px;
+  width: 14px;
+  font-size: 13px;
+  line-height: 1;
   color: var(--text-dim);
 }
 

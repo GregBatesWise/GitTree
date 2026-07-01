@@ -76,7 +76,10 @@ interface AppState {
   stageAll: () => Promise<void>
   unstageAll: () => Promise<void>
   discardFiles: (paths: string[]) => Promise<void>
-  commit: (message: string, amend: boolean) => Promise<boolean>
+  stageHunk: (patch: string) => Promise<void>
+  unstageHunk: (patch: string) => Promise<void>
+  discardHunk: (patch: string) => Promise<void>
+  commit: (message: string, amend: boolean, push: boolean) => Promise<boolean>
 
   push: (setUpstream: boolean) => Promise<void>
   pull: () => Promise<void>
@@ -86,6 +89,7 @@ interface AppState {
   createBranch: (name: string, checkoutNew: boolean, startPoint?: string) => Promise<boolean>
   mergeBranch: (name: string) => Promise<void>
   deleteBranch: (name: string, force: boolean) => Promise<void>
+  renameBranch: (oldName: string, newName: string) => Promise<boolean>
 
   stashSave: (message: string, includeUntracked: boolean) => Promise<boolean>
   stashApply: (ref: string, pop: boolean) => Promise<void>
@@ -113,6 +117,7 @@ interface AppState {
   restoreFileFromCommit: (hash: string, file: string) => Promise<void>
   externalDiffCommit: (hash: string, file: string) => Promise<void>
   copySha: (hash: string) => Promise<void>
+  copyText: (text: string) => Promise<void>
 }
 
 export const useStore = create<AppState>((set, get) => {
@@ -423,13 +428,47 @@ export const useStore = create<AppState>((set, get) => {
       }
     },
 
-    commit: async (message, amend) => {
+    stageHunk: async (patch) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      if (await runAction('Staging hunk', () => api.applyPatch(p, patch, { cached: true })))
+        await get().refreshAll()
+    },
+
+    unstageHunk: async (patch) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      if (
+        await runAction('Unstaging hunk', () =>
+          api.applyPatch(p, patch, { cached: true, reverse: true })
+        )
+      )
+        await get().refreshAll()
+    },
+
+    discardHunk: async (patch) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      if (await runAction('Discarding hunk', () => api.applyPatch(p, patch, { reverse: true })))
+        await get().refreshAll()
+    },
+
+    commit: async (message, amend, push) => {
       const p = get().activeRepoPath
       if (!p) return false
-      const ok = await runAction('Committing', () => api.commit(p, message, amend), 'Commit created')
+      const ok = await runAction(
+        'Committing',
+        () => api.commit(p, message, amend),
+        push ? undefined : 'Commit created'
+      )
       if (ok) {
         set({ selectedFile: null, diff: null })
         await get().refreshAll()
+        if (push) {
+          const st = get().status
+          const noUpstream = !!(st?.branch && !st.upstream)
+          await get().push(noUpstream)
+        }
       }
       return ok
     },
@@ -487,6 +526,16 @@ export const useStore = create<AppState>((set, get) => {
       if (!p) return
       if (await runAction(`Deleting ${name}`, () => api.deleteBranch(p, name, force)))
         await get().refreshAll()
+    },
+
+    renameBranch: async (oldName, newName) => {
+      const p = get().activeRepoPath
+      if (!p) return false
+      const ok = await runAction(`Renaming ${oldName}`, () =>
+        api.renameBranch(p, oldName, newName)
+      )
+      if (ok) await get().refreshAll()
+      return ok
     },
 
     stashSave: async (message, includeUntracked) => {
@@ -651,6 +700,11 @@ export const useStore = create<AppState>((set, get) => {
     copySha: async (hash) => {
       await api.copyText(hash)
       set({ toast: 'SHA copied to clipboard' })
+    },
+
+    copyText: async (text) => {
+      await api.copyText(text)
+      set({ toast: 'Copied to clipboard' })
     }
   }
 })

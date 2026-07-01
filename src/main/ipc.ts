@@ -2,6 +2,7 @@ import { ipcMain, dialog, shell, clipboard, BrowserWindow } from 'electron'
 import { spawn } from 'node:child_process'
 import { CH } from '../shared/channels'
 import type {
+  ApplyPatchOptions,
   FetchOptions,
   GitResult,
   PullOptions,
@@ -149,6 +150,9 @@ export function registerIpc(): void {
   ipcMain.handle(CH.discard, (_e, p: string, files: string[]) =>
     wrap(() => repo.discard(p, files))
   )
+  ipcMain.handle(CH.applyPatch, (_e, p: string, patch: string, opts: ApplyPatchOptions) =>
+    wrap(() => repo.applyPatch(p, patch, opts))
+  )
   ipcMain.handle(CH.commit, (_e, p: string, message: string, amend: boolean) =>
     wrap(() => repo.commit(p, message, amend))
   )
@@ -161,6 +165,9 @@ export function registerIpc(): void {
   ipcMain.handle(CH.merge, (_e, p: string, name: string) => wrap(() => repo.merge(p, name)))
   ipcMain.handle(CH.deleteBranch, (_e, p: string, name: string, force: boolean) =>
     wrap(() => repo.deleteBranch(p, name, force))
+  )
+  ipcMain.handle(CH.renameBranch, (_e, p: string, oldName: string, newName: string) =>
+    wrap(() => repo.renameBranch(p, oldName, newName))
   )
   ipcMain.handle(CH.push, (_e, p: string, opts: PushOptions) => wrap(() => repo.push(p, opts)))
   ipcMain.handle(CH.pull, (_e, p: string, opts: PullOptions) => wrap(() => repo.pull(p, opts)))

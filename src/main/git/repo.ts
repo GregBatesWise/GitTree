@@ -1,8 +1,10 @@
 import { promises as fs } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, isAbsolute } from 'node:path'
 import { runGit, gitOk } from './run'
 import * as P from './parsers'
 import type {
+  ApplyPatchOptions,
   BranchInfo,
   CommitDetail,
   CommitInfo,
@@ -180,6 +182,24 @@ export async function discard(path: string, files: string[]): Promise<void> {
   await runGit(path, ['clean', '-f', '--', ...files])
 }
 
+export async function applyPatch(
+  path: string,
+  patch: string,
+  opts: ApplyPatchOptions
+): Promise<void> {
+  const tmp = join(tmpdir(), `gittree-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`)
+  await fs.writeFile(tmp, patch, 'utf8')
+  try {
+    const args = ['apply', '--recount', '--whitespace=nowarn']
+    if (opts.cached) args.push('--cached')
+    if (opts.reverse) args.push('--reverse')
+    args.push('--', tmp)
+    await gitOk(path, args)
+  } finally {
+    await fs.rm(tmp, { force: true })
+  }
+}
+
 export async function commit(path: string, message: string, amend: boolean): Promise<void> {
   const args = ['commit', '-m', message]
   if (amend) args.push('--amend')
@@ -209,6 +229,14 @@ export async function merge(path: string, name: string): Promise<void> {
 
 export async function deleteBranch(path: string, name: string, force: boolean): Promise<void> {
   await gitOk(path, ['branch', force ? '-D' : '-d', name])
+}
+
+export async function renameBranch(
+  path: string,
+  oldName: string,
+  newName: string
+): Promise<void> {
+  await gitOk(path, ['branch', '-m', oldName, newName])
 }
 
 export async function push(path: string, opts: PushOptions): Promise<void> {

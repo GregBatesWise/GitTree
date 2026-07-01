@@ -73,15 +73,19 @@ function FileRow({ file, side }: { file: FileChange; side: 'staged' | 'unstaged'
 function CommitBox() {
   const [message, setMessage] = useState('')
   const [amend, setAmend] = useState(false)
+  const [pushOnCommit, setPushOnCommit] = useState(false)
   const status = useStore((s) => s.status)
+  const remotes = useStore((s) => s.remotes)
   const commit = useStore((s) => s.commit)
   const busy = useStore((s) => s.busy)
 
   const stagedCount = status?.staged.length ?? 0
+  const canPush = remotes.length > 0
+  const willPush = pushOnCommit && canPush
   const canCommit = message.trim().length > 0 && (stagedCount > 0 || amend) && !busy
 
   const onCommit = async (): Promise<void> => {
-    const ok = await commit(message.trim(), amend)
+    const ok = await commit(message.trim(), amend, willPush)
     if (ok) {
       setMessage('')
       setAmend(false)
@@ -99,12 +103,27 @@ function CommitBox() {
         }}
       />
       <div className="commit-actions">
-        <label className="amend">
-          <input type="checkbox" checked={amend} onChange={(e) => setAmend(e.target.checked)} />
-          Amend last commit
-        </label>
+        <div className="commit-opts">
+          <label className="amend">
+            <input type="checkbox" checked={amend} onChange={(e) => setAmend(e.target.checked)} />
+            Amend last commit
+          </label>
+          <label
+            className="amend"
+            title={canPush ? 'Push to the upstream remote after committing' : 'No remote configured'}
+          >
+            <input
+              type="checkbox"
+              checked={willPush}
+              disabled={!canPush}
+              onChange={(e) => setPushOnCommit(e.target.checked)}
+            />
+            Push after commit
+          </label>
+        </div>
         <button className="btn btn-primary" disabled={!canCommit} onClick={onCommit}>
-          Commit{stagedCount ? ` (${stagedCount})` : ''}
+          {willPush ? 'Commit & Push' : 'Commit'}
+          {stagedCount ? ` (${stagedCount})` : ''}
         </button>
       </div>
     </div>
@@ -124,23 +143,6 @@ export function WorkingCopy() {
       <div className="wc-left">
         <div className="wc-pane">
           <div className="wc-pane-head">
-            <span>Unstaged ({unstaged.length})</span>
-            <div className="group-btns">
-              <button className="mini-btn" disabled={!unstaged.length} onClick={() => stageAll()}>
-                Stage all
-              </button>
-            </div>
-          </div>
-          <div className="file-list">
-            {unstaged.map((f) => (
-              <FileRow key={'u' + f.path} file={f} side="unstaged" />
-            ))}
-            {!unstaged.length && <div className="side-empty">No unstaged changes</div>}
-          </div>
-        </div>
-
-        <div className="wc-pane">
-          <div className="wc-pane-head">
             <span>Staged ({staged.length})</span>
             <div className="group-btns">
               <button className="mini-btn" disabled={!staged.length} onClick={() => unstageAll()}>
@@ -153,6 +155,23 @@ export function WorkingCopy() {
               <FileRow key={'s' + f.path} file={f} side="staged" />
             ))}
             {!staged.length && <div className="side-empty">No staged changes</div>}
+          </div>
+        </div>
+
+        <div className="wc-pane">
+          <div className="wc-pane-head">
+            <span>Unstaged ({unstaged.length})</span>
+            <div className="group-btns">
+              <button className="mini-btn" disabled={!unstaged.length} onClick={() => stageAll()}>
+                Stage all
+              </button>
+            </div>
+          </div>
+          <div className="file-list">
+            {unstaged.map((f) => (
+              <FileRow key={'u' + f.path} file={f} side="unstaged" />
+            ))}
+            {!unstaged.length && <div className="side-empty">No unstaged changes</div>}
           </div>
         </div>
 

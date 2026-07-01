@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CH } from '../shared/channels'
 import type {
+  ApplyPatchOptions,
   BranchInfo,
   CommitDetail,
   CommitInfo,
@@ -64,6 +65,8 @@ const api = {
   unstageAll: (p: string): Promise<GitResult> => ipcRenderer.invoke(CH.unstageAll, p),
   discard: (p: string, files: string[]): Promise<GitResult> =>
     ipcRenderer.invoke(CH.discard, p, files),
+  applyPatch: (p: string, patch: string, opts: ApplyPatchOptions): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.applyPatch, p, patch, opts),
   commit: (p: string, message: string, amend: boolean): Promise<GitResult> =>
     ipcRenderer.invoke(CH.commit, p, message, amend),
   checkout: (p: string, name: string): Promise<GitResult> => ipcRenderer.invoke(CH.checkout, p, name),
@@ -76,6 +79,8 @@ const api = {
   merge: (p: string, name: string): Promise<GitResult> => ipcRenderer.invoke(CH.merge, p, name),
   deleteBranch: (p: string, name: string, force: boolean): Promise<GitResult> =>
     ipcRenderer.invoke(CH.deleteBranch, p, name, force),
+  renameBranch: (p: string, oldName: string, newName: string): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.renameBranch, p, oldName, newName),
   push: (p: string, opts: PushOptions): Promise<GitResult> => ipcRenderer.invoke(CH.push, p, opts),
   pull: (p: string, opts: PullOptions): Promise<GitResult> => ipcRenderer.invoke(CH.pull, p, opts),
   fetch: (p: string, opts: FetchOptions): Promise<GitResult> =>
@@ -113,7 +118,12 @@ const api = {
     ipcRenderer.invoke(CH.restoreFileFromCommit, p, hash, file),
   externalDiffCommit: (p: string, hash: string, file: string): Promise<GitResult> =>
     ipcRenderer.invoke(CH.externalDiffCommit, p, hash, file),
-  copyText: (text: string): Promise<void> => ipcRenderer.invoke(CH.copyText, text)
+  copyText: (text: string): Promise<void> => ipcRenderer.invoke(CH.copyText, text),
+  onRefresh: (cb: () => void): (() => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on(CH.appRefresh, listener)
+    return () => ipcRenderer.removeListener(CH.appRefresh, listener)
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)

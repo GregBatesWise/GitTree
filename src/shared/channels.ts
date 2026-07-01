@@ -29,6 +29,7 @@ export const CH = {
   commit: 'git:commit',
   checkout: 'git:checkout',
   createBranch: 'git:createBranch',
+  renameBranch: 'git:renameBranch',
   merge: 'git:merge',
   deleteBranch: 'git:deleteBranch',
   push: 'git:push',
@@ -49,7 +50,9 @@ export const CH = {
   cherryPick: 'git:cherryPick',
   restoreFileFromCommit: 'git:restoreFileFromCommit',
   externalDiffCommit: 'git:externalDiffCommit',
-  copyText: 'clipboard:writeText'
+  copyText: 'clipboard:writeText',
+  applyPatch: 'git:applyPatch',
+  appRefresh: 'app:refresh'
 } as const
 
 export type ChannelName = (typeof CH)[keyof typeof CH]

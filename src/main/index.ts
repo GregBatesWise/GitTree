@@ -1,5 +1,6 @@
 import { app, BrowserWindow, shell, session } from 'electron'
 import { join } from 'node:path'
+import { CH } from '../shared/channels'
 import { registerIpc } from './ipc'
 
 const isDev = !!process.env['ELECTRON_RENDERER_URL']
@@ -30,6 +31,22 @@ function createWindow(): void {
       shell.openExternal(url)
     }
     return { action: 'deny' }
+  })
+
+  // Ctrl/Cmd+R refreshes the repository instead of reloading the window.
+  win.webContents.on('before-input-event', (event, input) => {
+    const mod = input.control || input.meta
+    if (
+      input.type === 'keyDown' &&
+      !input.isAutoRepeat &&
+      mod &&
+      !input.shift &&
+      !input.alt &&
+      input.key.toLowerCase() === 'r'
+    ) {
+      event.preventDefault()
+      win.webContents.send(CH.appRefresh)
+    }
   })
 
   if (isDev) {

@@ -135,6 +135,11 @@ export interface FetchOptions {
 
 export type ResetMode = 'soft' | 'mixed' | 'hard'
 
+export interface ApplyPatchOptions {
+  cached?: boolean
+  reverse?: boolean
+}
+
 export interface GitResult<T = void> {
   ok: boolean
   data?: T

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { Modal } from './Dialog'
-import type { SubmoduleInfo } from '@shared/types'
+import { ContextMenu, type MenuItem } from './ContextMenu'
+import type { BranchInfo, SubmoduleInfo } from '@shared/types'
 
 function subStateLabel(state: SubmoduleInfo['state']): string {
   switch (state) {
@@ -68,7 +69,57 @@ function AddRemoteDialog({ onClose }: { onClose: () => void }) {
   )
 }
 
-export function Sidebar() {
+function RenameBranchDialog({ name, onClose }: { name: string; onClose: () => void }) {
+  const [newName, setNewName] = useState(name)
+  const rename = useStore((s) => s.renameBranch)
+  const busy = useStore((s) => s.busy)
+
+  const submit = async (): Promise<void> => {
+    const trimmed = newName.trim()
+    if (!trimmed || trimmed === name) {
+      onClose()
+      return
+    }
+    const ok = await rename(name, trimmed)
+    if (ok) onClose()
+  }
+
+  return (
+    <Modal
+      title={`Rename "${name}"`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-primary"
+            disabled={!newName.trim() || newName.trim() === name || !!busy}
+            onClick={submit}
+          >
+            Rename
+          </button>
+        </>
+      }
+    >
+      <label>
+        New branch name
+        <input
+          type="text"
+          autoFocus
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+          }}
+        />
+      </label>
+    </Modal>
+  )
+}
+
+export function Sidebar({ width }: { width?: number }) {
   const view = useStore((s) => s.view)
   const setView = useStore((s) => s.setView)
   const status = useStore((s) => s.status)
@@ -89,17 +140,46 @@ export function Sidebar() {
   const updateSubmodule = useStore((s) => s.updateSubmodule)
 
   const [remoteDlg, setRemoteDlg] = useState(false)
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({
+    remotes: true,
+    tags: true,
+    submodules: true,
+    stashes: true
+  })
   const toggle = (k: string): void => setCollapsed((c) => ({ ...c, [k]: !c[k] }))
+  const [branchMenu, setBranchMenu] = useState<{
+    x: number
+    y: number
+    branch: BranchInfo
+  } | null>(null)
+  const [renameTarget, setRenameTarget] = useState<string | null>(null)
 
-  if (!active) return <div className="sidebar" />
+  if (!active) return <div className="sidebar" style={{ width }} />
 
   const locals = branches.filter((b) => !b.isRemote)
   const remoteBranches = branches.filter((b) => b.isRemote)
   const changes = (status?.staged.length ?? 0) + (status?.unstaged.length ?? 0)
 
+  const buildBranchMenu = (b: BranchInfo): MenuItem[] => {
+    const items: MenuItem[] = []
+    if (!b.current) items.push({ label: 'Checkout', onClick: () => checkout(b.name) })
+    items.push({ label: 'Rename\u2026', onClick: () => setRenameTarget(b.name) })
+    if (!b.current) {
+      items.push({ label: 'Merge into Current Branch', onClick: () => merge(b.name) })
+      items.push({ separator: true })
+      items.push({
+        label: 'Delete Branch',
+        danger: true,
+        onClick: () => {
+          if (confirm(`Delete branch "${b.name}"?`)) deleteBranch(b.name, false)
+        }
+      })
+    }
+    return items
+  }
+
   return (
-    <div className="sidebar">
+    <div className="sidebar" style={{ width }}>
       <div className="side-section">
         <div className="side-head">Workspace</div>
         <div
@@ -135,6 +215,10 @@ export function Sidebar() {
                 title={b.current ? b.name + ' (current)' : 'Check out ' + b.name}
                 onClick={() => {
                   if (!b.current) checkout(b.name)
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  setBranchMenu({ x: e.clientX, y: e.clientY, branch: b })
                 }}
               >
                 <span className="ico">{b.current ? '●' : '○'}</span>
@@ -318,6 +402,17 @@ export function Sidebar() {
       </div>
 
       {remoteDlg && <AddRemoteDialog onClose={() => setRemoteDlg(false)} />}
+      {branchMenu && (
+        <ContextMenu
+          x={branchMenu.x}
+          y={branchMenu.y}
+          items={buildBranchMenu(branchMenu.branch)}
+          onClose={() => setBranchMenu(null)}
+        />
+      )}
+      {renameTarget && (
+        <RenameBranchDialog name={renameTarget} onClose={() => setRenameTarget(null)} />
+      )}
     </div>
   )
 }

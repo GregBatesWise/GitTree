@@ -1,6 +1,6 @@
 {
   "name": "git-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "productName": "GitTree",
   "description": "A SourceTree-like Git desktop client built with Electron + React",
   "author": "GitTree",
@@ -12,7 +12,8 @@
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "package:win": "electron-vite build && electron-builder --win --x64"
+    "package:win": "electron-vite build && electron-builder --win --x64",
+    "release:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-portable.ps1"
   },
   "devDependencies": {
     "@types/node": "^22.7.4",

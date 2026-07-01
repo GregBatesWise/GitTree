@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useStore } from './store'
 import { Toolbar } from './components/Toolbar'
 import { Sidebar } from './components/Sidebar'
@@ -24,15 +24,44 @@ export default function App() {
   const status = useStore((s) => s.status)
   const error = useStore((s) => s.error)
   const dismissError = useStore((s) => s.dismissError)
+  const copyText = useStore((s) => s.copyText)
   const toast = useStore((s) => s.toast)
   const dismissToast = useStore((s) => s.dismissToast)
   const busy = useStore((s) => s.busy)
   const loading = useStore((s) => s.loading)
   const addRepo = useStore((s) => s.addRepoViaDialog)
+  const refreshAll = useStore((s) => s.refreshAll)
+
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('sidebarWidth'))
+    return saved >= 180 && saved <= 520 ? saved : 248
+  })
+
+  const onResizeStart = (e: ReactMouseEvent): void => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = sidebarWidth
+    let latest = startW
+    const onMove = (ev: MouseEvent): void => {
+      latest = Math.min(520, Math.max(180, startW + ev.clientX - startX))
+      setSidebarWidth(latest)
+    }
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.classList.remove('resizing')
+      localStorage.setItem('sidebarWidth', String(latest))
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    document.body.classList.add('resizing')
+  }
 
   useEffect(() => {
     init()
   }, [init])
+
+  useEffect(() => window.api.onRefresh(() => refreshAll()), [refreshAll])
 
   useEffect(() => {
     if (!toast) return
@@ -46,13 +75,23 @@ export default function App() {
       {error && (
         <div className="error-bar">
           <span className="msg">{error}</span>
+          <button className="copy-btn" onClick={() => copyText(error)} title="Copy error message">
+            Copy
+          </button>
           <button onClick={dismissError} title="Dismiss">
             ✕
           </button>
         </div>
       )}
       <div className="body">
-        <Sidebar />
+        <Sidebar width={sidebarWidth} />
+        <div
+          className="resizer"
+          onMouseDown={onResizeStart}
+          role="separator"
+          aria-orientation="vertical"
+          title="Drag to resize the sidebar"
+        />
         <div className="content">
           {!active ? (
             <EmptyState onAdd={addRepo} />
