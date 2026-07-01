@@ -15,6 +15,6 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
-  artifactName: ${productName}-${version}-setup.${ext}
+  artifactName: GitTree-setup.${ext}
 portable:
-  artifactName: ${productName}-${version}-portable.${ext}
+  artifactName: GitTree.${ext}

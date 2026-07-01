@@ -522,6 +522,11 @@ body.resizing {
   border-left-color: var(--accent);
 }
 
+.file-row.multi {
+  background: var(--accent-dim);
+  border-left-color: var(--accent);
+}
+
 .file-row .st {
   width: 14px;
   text-align: center;

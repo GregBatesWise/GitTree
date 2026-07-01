@@ -1,28 +1,29 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Builds the GitTree portable Windows executable and publishes it to the Desktop.
+    Bumps the minor version, builds GitTree, packages Windows executables, and
+    copies the portable GitTree.exe to the Desktop.
 
 .DESCRIPTION
     Each run:
-      1. Bumps the version in package.json (minor by default: 0.1.0 -> 0.2.0).
+      1. Bumps the version in package.json (minor by default: 0.2.0 -> 0.3.0).
       2. Builds the main / preload / renderer bundles with electron-vite.
-      3. Packages a portable .exe with electron-builder.
-      4. Removes any previous GitTree portable build from the Desktop and copies
-         the freshly built one in its place.
+      3. Packages both the NSIS installer and portable .exe with electron-builder.
+      4. Replaces any previous GitTree.exe on the Desktop with the new build.
 
     The version bump edits package.json only - it does NOT create a git commit or tag.
+    The version is embedded in the executable's file/product version metadata.
 
 .PARAMETER Bump
-    Which semver segment to increment: 'major', 'minor' (default) or 'patch'.
+    Which semver segment to increment: 'major', 'minor' or 'patch' (default).
 
 .EXAMPLE
     ./scripts/build-portable.ps1
-    Bumps the minor version and publishes GitTree-<new>-portable.exe to the Desktop.
+    Bumps the minor version and copies GitTree.exe to the Desktop.
 
 .EXAMPLE
     ./scripts/build-portable.ps1 -Bump patch
-    Bumps the patch version instead (0.2.0 -> 0.2.1).
+    Bumps the patch version instead (0.3.0 -> 0.3.1).
 #>
 [CmdletBinding()]
 param(
@@ -49,49 +50,40 @@ try {
     npm version $Bump --no-git-tag-version | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "npm version bump failed (exit $LASTEXITCODE)." }
 
-    $pkg = Get-Content -Raw -LiteralPath $pkgPath | ConvertFrom-Json
-    $version = $pkg.version
-    $product = $pkg.productName
+    $version = (Get-Content -Raw -LiteralPath $pkgPath | ConvertFrom-Json).version
     Write-Host "    $before -> $version" -ForegroundColor Green
 
     Write-Host "==> Building bundles (electron-vite)..." -ForegroundColor Cyan
     npm run build
     if ($LASTEXITCODE -ne 0) { throw "Bundle build failed (exit $LASTEXITCODE)." }
 
-    Write-Host "==> Packaging portable .exe (electron-builder)..." -ForegroundColor Cyan
+    Write-Host "==> Packaging Windows executables (electron-builder)..." -ForegroundColor Cyan
     $electronBuilder = Join-Path $repoRoot 'node_modules\.bin\electron-builder.cmd'
     if (-not (Test-Path -LiteralPath $electronBuilder)) {
         throw "electron-builder not found. Run 'npm install' first."
     }
-    & $electronBuilder --win portable --x64
+    & $electronBuilder --win --x64
     if ($LASTEXITCODE -ne 0) { throw "electron-builder packaging failed (exit $LASTEXITCODE)." }
 
-    # Locate the built artifact (dist/GitTree-<version>-portable.exe).
-    $artifact = Join-Path $repoRoot "dist\$product-$version-portable.exe"
+    # The portable artifact is always dist\GitTree.exe (no version in filename).
+    $artifact = Join-Path $repoRoot 'dist\GitTree.exe'
     if (-not (Test-Path -LiteralPath $artifact)) {
-        $newest = Get-ChildItem -Path (Join-Path $repoRoot 'dist') -Filter "$product-*-portable.exe" -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if ($newest) { $artifact = $newest.FullName }
-    }
-    if (-not (Test-Path -LiteralPath $artifact)) {
-        throw "Could not find a portable .exe in '$repoRoot\dist'."
+        throw "Portable exe not found at '$artifact'. Check electron-builder output."
     }
 
+    # Replace any previous GitTree exe on the Desktop (including old versioned names).
     $desktop = [Environment]::GetFolderPath('Desktop')
-    $fileName = Split-Path -Leaf $artifact
+    Get-ChildItem -Path $desktop -Filter 'GitTree*.exe' -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            Write-Host "==> Removing old Desktop build: $($_.Name)" -ForegroundColor Cyan
+            Remove-Item -LiteralPath $_.FullName -Force
+        }
 
-    # Remove previous portable builds from the Desktop so only the latest remains.
-    $old = Get-ChildItem -Path $desktop -Filter "$product-*-portable.exe" -ErrorAction SilentlyContinue
-    foreach ($f in $old) {
-        Write-Host "==> Removing previous build from Desktop: $($f.Name)" -ForegroundColor Cyan
-        Remove-Item -LiteralPath $f.FullName -Force
-    }
-
-    $dest = Join-Path $desktop $fileName
+    $dest = Join-Path $desktop 'GitTree.exe'
     Copy-Item -LiteralPath $artifact -Destination $dest -Force
 
     Write-Host ''
-    Write-Host "Published $fileName to the Desktop." -ForegroundColor Green
+    Write-Host "GitTree $version published to Desktop." -ForegroundColor Green
     Write-Host "    $dest" -ForegroundColor Green
 }
 finally {

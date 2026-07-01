@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useStore } from '../store'
 import { DiffViewer } from './DiffViewer'
 import type { FileChange } from '@shared/types'
+
+type Side = 'staged' | 'unstaged'
 
 function statusLetter(status: FileChange['status']): string {
   switch (status) {
@@ -24,20 +26,29 @@ function statusLetter(status: FileChange['status']): string {
   }
 }
 
-function FileRow({ file, side }: { file: FileChange; side: 'staged' | 'unstaged' }) {
-  const select = useStore((s) => s.selectWorkingFile)
-  const sel = useStore((s) => s.selectedFile)
-  const stage = useStore((s) => s.stageFiles)
-  const unstage = useStore((s) => s.unstageFiles)
-  const discard = useStore((s) => s.discardFiles)
-
-  const active =
-    sel?.kind === 'working' && sel.path === file.path && sel.staged === file.staged
-
+function FileRow({
+  file,
+  side,
+  active,
+  multi,
+  onClick,
+  onStage,
+  onUnstage,
+  onDiscard
+}: {
+  file: FileChange
+  side: Side
+  active: boolean
+  multi: boolean
+  onClick: (e: ReactMouseEvent) => void
+  onStage: () => void
+  onUnstage: () => void
+  onDiscard: () => void
+}) {
   return (
     <div
-      className={'file-row' + (active ? ' selected' : '')}
-      onClick={() => select(file)}
+      className={'file-row' + (active ? ' selected' : '') + (multi ? ' multi' : '')}
+      onClick={onClick}
       title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}
     >
       <span className={'st ' + file.status}>{statusLetter(file.status)}</span>
@@ -45,23 +56,15 @@ function FileRow({ file, side }: { file: FileChange; side: 'staged' | 'unstaged'
       <span className="row-actions" onClick={(e) => e.stopPropagation()}>
         {side === 'unstaged' ? (
           <>
-            <button className="mini-btn" onClick={() => stage([file.path])}>
+            <button className="mini-btn" onClick={onStage}>
               Stage
             </button>
-            <button
-              className="mini-btn danger"
-              title="Discard changes"
-              onClick={() => {
-                if (confirm(`Discard changes to "${file.path}"? This cannot be undone.`)) {
-                  discard([file.path])
-                }
-              }}
-            >
+            <button className="mini-btn danger" title="Discard changes" onClick={onDiscard}>
               ✕
             </button>
           </>
         ) : (
-          <button className="mini-btn" onClick={() => unstage([file.path])}>
+          <button className="mini-btn" onClick={onUnstage}>
             Unstage
           </button>
         )}
@@ -132,11 +135,102 @@ function CommitBox() {
 
 export function WorkingCopy() {
   const status = useStore((s) => s.status)
+  const sel = useStore((s) => s.selectedFile)
+  const select = useStore((s) => s.selectWorkingFile)
+  const stage = useStore((s) => s.stageFiles)
+  const unstage = useStore((s) => s.unstageFiles)
+  const discard = useStore((s) => s.discardFiles)
   const stageAll = useStore((s) => s.stageAll)
   const unstageAll = useStore((s) => s.unstageAll)
 
   const unstaged = status?.unstaged ?? []
   const staged = status?.staged ?? []
+  const unstagedPaths = unstaged.map((f) => f.path)
+  const stagedPaths = staged.map((f) => f.path)
+
+  const [selection, setSelection] = useState<{
+    side: Side
+    paths: string[]
+    anchor: string
+  } | null>(null)
+
+  const isMulti = (side: Side, path: string): boolean =>
+    !!selection && selection.side === side && selection.paths.includes(path)
+
+  const selCount = (side: Side): number =>
+    selection && selection.side === side ? selection.paths.length : 0
+
+  const rowClick = (side: Side, file: FileChange, e: ReactMouseEvent): void => {
+    const list = side === 'staged' ? stagedPaths : unstagedPaths
+    const path = file.path
+    if (e.shiftKey && selection && selection.side === side) {
+      const a = list.indexOf(selection.anchor)
+      const b = list.indexOf(path)
+      if (a !== -1 && b !== -1) {
+        const [lo, hi] = a < b ? [a, b] : [b, a]
+        setSelection({ side, paths: list.slice(lo, hi + 1), anchor: selection.anchor })
+      }
+    } else if (e.ctrlKey || e.metaKey) {
+      if (selection && selection.side === side) {
+        const has = selection.paths.includes(path)
+        const paths = has
+          ? selection.paths.filter((p) => p !== path)
+          : [...selection.paths, path]
+        setSelection(paths.length ? { side, paths, anchor: path } : null)
+      } else {
+        setSelection({ side, paths: [path], anchor: path })
+      }
+    } else {
+      setSelection({ side, paths: [path], anchor: path })
+    }
+    select(file)
+  }
+
+  // Files to act on: the whole selection if the clicked row is part of it,
+  // otherwise just the clicked row. Stale paths are filtered out.
+  const targets = (side: Side, path: string): string[] => {
+    const list = side === 'staged' ? stagedPaths : unstagedPaths
+    if (selection && selection.side === side && selection.paths.includes(path)) {
+      return selection.paths.filter((p) => list.includes(p))
+    }
+    return [path]
+  }
+
+  const doStage = (path: string): void => {
+    stage(targets('unstaged', path))
+    setSelection(null)
+  }
+  const doUnstage = (path: string): void => {
+    unstage(targets('staged', path))
+    setSelection(null)
+  }
+  const doDiscard = (path: string): void => {
+    const t = targets('unstaged', path)
+    const label = t.length > 1 ? `${t.length} files` : `"${t[0]}"`
+    if (confirm(`Discard changes to ${label}? This cannot be undone.`)) {
+      discard(t)
+      setSelection(null)
+    }
+  }
+
+  const stageSelected = (): void => {
+    if (!selection || selection.side !== 'unstaged') return
+    stage(selection.paths.filter((p) => unstagedPaths.includes(p)))
+    setSelection(null)
+  }
+  const unstageSelected = (): void => {
+    if (!selection || selection.side !== 'staged') return
+    unstage(selection.paths.filter((p) => stagedPaths.includes(p)))
+    setSelection(null)
+  }
+  const discardSelected = (): void => {
+    if (!selection || selection.side !== 'unstaged') return
+    const t = selection.paths.filter((p) => unstagedPaths.includes(p))
+    if (confirm(`Discard changes to ${t.length} files? This cannot be undone.`)) {
+      discard(t)
+      setSelection(null)
+    }
+  }
 
   return (
     <div className="working">
@@ -145,6 +239,11 @@ export function WorkingCopy() {
           <div className="wc-pane-head">
             <span>Staged ({staged.length})</span>
             <div className="group-btns">
+              {selCount('staged') > 1 && (
+                <button className="mini-btn" onClick={unstageSelected}>
+                  Unstage ({selCount('staged')})
+                </button>
+              )}
               <button className="mini-btn" disabled={!staged.length} onClick={() => unstageAll()}>
                 Unstage all
               </button>
@@ -152,7 +251,17 @@ export function WorkingCopy() {
           </div>
           <div className="file-list">
             {staged.map((f) => (
-              <FileRow key={'s' + f.path} file={f} side="staged" />
+              <FileRow
+                key={'s' + f.path}
+                file={f}
+                side="staged"
+                active={sel?.kind === 'working' && sel.path === f.path && sel.staged === f.staged}
+                multi={isMulti('staged', f.path)}
+                onClick={(e) => rowClick('staged', f, e)}
+                onStage={() => doStage(f.path)}
+                onUnstage={() => doUnstage(f.path)}
+                onDiscard={() => doDiscard(f.path)}
+              />
             ))}
             {!staged.length && <div className="side-empty">No staged changes</div>}
           </div>
@@ -162,6 +271,16 @@ export function WorkingCopy() {
           <div className="wc-pane-head">
             <span>Unstaged ({unstaged.length})</span>
             <div className="group-btns">
+              {selCount('unstaged') > 1 && (
+                <>
+                  <button className="mini-btn" onClick={stageSelected}>
+                    Stage ({selCount('unstaged')})
+                  </button>
+                  <button className="mini-btn danger" onClick={discardSelected}>
+                    Discard ({selCount('unstaged')})
+                  </button>
+                </>
+              )}
               <button className="mini-btn" disabled={!unstaged.length} onClick={() => stageAll()}>
                 Stage all
               </button>
@@ -169,7 +288,17 @@ export function WorkingCopy() {
           </div>
           <div className="file-list">
             {unstaged.map((f) => (
-              <FileRow key={'u' + f.path} file={f} side="unstaged" />
+              <FileRow
+                key={'u' + f.path}
+                file={f}
+                side="unstaged"
+                active={sel?.kind === 'working' && sel.path === f.path && sel.staged === f.staged}
+                multi={isMulti('unstaged', f.path)}
+                onClick={(e) => rowClick('unstaged', f, e)}
+                onStage={() => doStage(f.path)}
+                onUnstage={() => doUnstage(f.path)}
+                onDiscard={() => doDiscard(f.path)}
+              />
             ))}
             {!unstaged.length && <div className="side-empty">No unstaged changes</div>}
           </div>

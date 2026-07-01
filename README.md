@@ -34,9 +34,23 @@ npm run dev      # launch the app with hot reload
 ## Build & package
 
 ```powershell
-npm run build        # produce the production bundle in ./out
-npm run package:win  # build a Windows installer into ./dist (electron-builder)
+npm run package:win
 ```
+
+That's it. Each run automatically:
+
+1. Bumps the **minor** version in `package.json` (e.g. `0.2.0 → 0.3.0`) — the new version is embedded as the executable's file/product version metadata.
+2. Builds the production bundle.
+3. Packages two Windows executables into `./dist/`:
+
+| File | Description |
+|---|---|
+| `GitTree-setup.exe` | NSIS installer — lets the user choose the install directory; creates Start Menu and Desktop shortcuts. |
+| `GitTree.exe` | Self-contained portable executable — no installation required; just run it. |
+
+4. Copies `GitTree.exe` to your **Desktop**, replacing any previous build.
+
+> **First-time setup:** run `npm run build:icon` once to generate `build/icon.ico` from `build/icon.svg` before your first build. You only need to repeat this if you change the icon.
 
 ## Architecture
 
