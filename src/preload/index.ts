@@ -12,8 +12,11 @@ import type {
   PushOptions,
   RemoteInfo,
   RepoBookmark,
+  ResetMode,
   StashInfo,
-  StatusResult
+  StatusResult,
+  SubmoduleInfo,
+  TagInfo
 } from '../shared/types'
 
 const api = {
@@ -21,13 +24,19 @@ const api = {
   addRepo: (path: string): Promise<GitResult<RepoBookmark>> => ipcRenderer.invoke(CH.repoAdd, path),
   removeRepo: (id: string): Promise<void> => ipcRenderer.invoke(CH.repoRemove, id),
   openFolder: (): Promise<string | null> => ipcRenderer.invoke(CH.openFolder),
+  revealInFileManager: (p: string): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.revealInFileManager, p),
+  openInTerminal: (p: string): Promise<GitResult> => ipcRenderer.invoke(CH.openInTerminal, p),
 
   status: (p: string): Promise<GitResult<StatusResult>> => ipcRenderer.invoke(CH.status, p),
-  log: (p: string, limit?: number): Promise<GitResult<CommitInfo[]>> =>
-    ipcRenderer.invoke(CH.log, p, limit),
+  log: (p: string, limit?: number, ref?: string): Promise<GitResult<CommitInfo[]>> =>
+    ipcRenderer.invoke(CH.log, p, limit, ref),
   branches: (p: string): Promise<GitResult<BranchInfo[]>> => ipcRenderer.invoke(CH.branches, p),
   stashes: (p: string): Promise<GitResult<StashInfo[]>> => ipcRenderer.invoke(CH.stashes, p),
   remotes: (p: string): Promise<GitResult<RemoteInfo[]>> => ipcRenderer.invoke(CH.remotes, p),
+  tags: (p: string): Promise<GitResult<TagInfo[]>> => ipcRenderer.invoke(CH.tags, p),
+  submodules: (p: string): Promise<GitResult<SubmoduleInfo[]>> =>
+    ipcRenderer.invoke(CH.submodules, p),
 
   diffWorking: (
     p: string,
@@ -80,7 +89,31 @@ const api = {
   addRemote: (p: string, name: string, url: string): Promise<GitResult> =>
     ipcRenderer.invoke(CH.addRemote, p, name, url),
   removeRemote: (p: string, name: string): Promise<GitResult> =>
-    ipcRenderer.invoke(CH.removeRemote, p, name)
+    ipcRenderer.invoke(CH.removeRemote, p, name),
+  createTag: (
+    p: string,
+    name: string,
+    ref: string | undefined,
+    message: string | undefined
+  ): Promise<GitResult> => ipcRenderer.invoke(CH.createTag, p, name, ref, message),
+  deleteTag: (p: string, name: string): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.deleteTag, p, name),
+  pushTag: (p: string, remote: string, name: string): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.pushTag, p, remote, name),
+  submoduleUpdate: (p: string, init: boolean, paths?: string[]): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.submoduleUpdate, p, init, paths),
+  rebase: (p: string, onto: string): Promise<GitResult> => ipcRenderer.invoke(CH.rebase, p, onto),
+  revertCommit: (p: string, hash: string): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.revertCommit, p, hash),
+  resetTo: (p: string, hash: string, mode: ResetMode): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.resetTo, p, hash, mode),
+  cherryPick: (p: string, hash: string): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.cherryPick, p, hash),
+  restoreFileFromCommit: (p: string, hash: string, file: string): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.restoreFileFromCommit, p, hash, file),
+  externalDiffCommit: (p: string, hash: string, file: string): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.externalDiffCommit, p, hash, file),
+  copyText: (text: string): Promise<void> => ipcRenderer.invoke(CH.copyText, text)
 }
 
 contextBridge.exposeInMainWorld('api', api)

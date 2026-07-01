@@ -1,6 +1,20 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { Modal } from './Dialog'
+import type { SubmoduleInfo } from '@shared/types'
+
+function subStateLabel(state: SubmoduleInfo['state']): string {
+  switch (state) {
+    case 'uninitialized':
+      return 'uninit'
+    case 'modified':
+      return 'modified'
+    case 'conflict':
+      return 'conflict'
+    default:
+      return ''
+  }
+}
 
 function AddRemoteDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('origin')
@@ -61,14 +75,22 @@ export function Sidebar() {
   const branches = useStore((s) => s.branches)
   const stashes = useStore((s) => s.stashes)
   const remotes = useStore((s) => s.remotes)
+  const tags = useStore((s) => s.tags)
+  const submodules = useStore((s) => s.submodules)
   const active = useStore((s) => s.activeRepoPath)
   const checkout = useStore((s) => s.checkoutBranch)
   const merge = useStore((s) => s.mergeBranch)
   const deleteBranch = useStore((s) => s.deleteBranch)
   const stashApply = useStore((s) => s.stashApply)
   const stashDrop = useStore((s) => s.stashDrop)
+  const deleteTag = useStore((s) => s.deleteTag)
+  const pushTag = useStore((s) => s.pushTag)
+  const updateSubmodules = useStore((s) => s.updateSubmodules)
+  const updateSubmodule = useStore((s) => s.updateSubmodule)
 
   const [remoteDlg, setRemoteDlg] = useState(false)
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const toggle = (k: string): void => setCollapsed((c) => ({ ...c, [k]: !c[k] }))
 
   if (!active) return <div className="sidebar" />
 
@@ -98,92 +120,201 @@ export function Sidebar() {
       </div>
 
       <div className="side-section">
-        <div className="side-head">Branches</div>
-        {locals.map((b) => (
-          <div
-            key={b.name}
-            className={'side-item' + (b.current ? ' current' : '')}
-            title={b.current ? b.name + ' (current)' : 'Check out ' + b.name}
-            onClick={() => {
-              if (!b.current) checkout(b.name)
-            }}
-          >
-            <span className="ico">{b.current ? '●' : '○'}</span>
-            <span className="label">{b.name}</span>
-            {b.ahead || b.behind ? (
-              <span className="track">
-                {b.ahead ? `↑${b.ahead}` : ''}
-                {b.behind ? `↓${b.behind}` : ''}
-              </span>
-            ) : null}
-            {!b.current && (
-              <span className="hover-actions" onClick={(e) => e.stopPropagation()}>
-                <button className="mini-btn" onClick={() => merge(b.name)}>
-                  Merge
-                </button>
-                <button
-                  className="mini-btn danger"
-                  title="Delete branch"
-                  onClick={() => {
-                    if (confirm(`Delete branch "${b.name}"?`)) deleteBranch(b.name, false)
-                  }}
-                >
-                  ✕
-                </button>
-              </span>
-            )}
-          </div>
-        ))}
-        {!locals.length && <div className="side-empty">No local branches</div>}
+        <div className="side-head">
+          <span className="side-title" onClick={() => toggle('branches')}>
+            <span className="chevron">{collapsed.branches ? '▸' : '▾'}</span>
+            Branches
+          </span>
+        </div>
+        {!collapsed.branches && (
+          <>
+            {locals.map((b) => (
+              <div
+                key={b.name}
+                className={'side-item' + (b.current ? ' current' : '')}
+                title={b.current ? b.name + ' (current)' : 'Check out ' + b.name}
+                onClick={() => {
+                  if (!b.current) checkout(b.name)
+                }}
+              >
+                <span className="ico">{b.current ? '●' : '○'}</span>
+                <span className="label">{b.name}</span>
+                {b.ahead || b.behind ? (
+                  <span className="track">
+                    {b.ahead ? `↑${b.ahead}` : ''}
+                    {b.behind ? `↓${b.behind}` : ''}
+                  </span>
+                ) : null}
+                {!b.current && (
+                  <span className="hover-actions" onClick={(e) => e.stopPropagation()}>
+                    <button className="mini-btn" onClick={() => merge(b.name)}>
+                      Merge
+                    </button>
+                    <button
+                      className="mini-btn danger"
+                      title="Delete branch"
+                      onClick={() => {
+                        if (confirm(`Delete branch "${b.name}"?`)) deleteBranch(b.name, false)
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                )}
+              </div>
+            ))}
+            {!locals.length && <div className="side-empty">No local branches</div>}
+          </>
+        )}
       </div>
 
       <div className="side-section">
         <div className="side-head">
-          Remotes
+          <span className="side-title" onClick={() => toggle('remotes')}>
+            <span className="chevron">{collapsed.remotes ? '▸' : '▾'}</span>
+            Remotes
+          </span>
           <button title="Add remote" onClick={() => setRemoteDlg(true)}>
             ＋
           </button>
         </div>
-        {remotes.length === 0 && <div className="side-empty">No remotes configured</div>}
-        {remoteBranches.map((b) => (
-          <div
-            key={b.name}
-            className="side-item"
-            title={'Check out ' + b.name}
-            onClick={() => checkout(b.name.replace(/^[^/]+\//, ''))}
-          >
-            <span className="ico">⤓</span>
-            <span className="label">{b.name}</span>
-          </div>
-        ))}
+        {!collapsed.remotes && (
+          <>
+            {remotes.length === 0 && <div className="side-empty">No remotes configured</div>}
+            {remoteBranches.map((b) => (
+              <div
+                key={b.name}
+                className="side-item"
+                title={'Check out ' + b.name}
+                onClick={() => checkout(b.name.replace(/^[^/]+\//, ''))}
+              >
+                <span className="ico">⤓</span>
+                <span className="label">{b.name}</span>
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       <div className="side-section">
-        <div className="side-head">Stashes</div>
-        {stashes.map((s) => (
-          <div key={s.ref} className="side-item" title={s.message}>
-            <span className="ico">⚑</span>
-            <span className="label">{s.message}</span>
-            <span className="hover-actions" onClick={(e) => e.stopPropagation()}>
-              <button className="mini-btn" title="Apply and drop" onClick={() => stashApply(s.ref, true)}>
-                Pop
-              </button>
-              <button className="mini-btn" title="Apply, keep stash" onClick={() => stashApply(s.ref, false)}>
-                Apply
-              </button>
-              <button
-                className="mini-btn danger"
-                title="Drop stash"
-                onClick={() => {
-                  if (confirm(`Drop ${s.ref}?`)) stashDrop(s.ref)
-                }}
+        <div className="side-head">
+          <span className="side-title" onClick={() => toggle('tags')}>
+            <span className="chevron">{collapsed.tags ? '▸' : '▾'}</span>
+            Tags
+          </span>
+        </div>
+        {!collapsed.tags && (
+          <>
+            {tags.map((t) => (
+              <div
+                key={t.name}
+                className="side-item"
+                title={
+                  (t.annotated ? 'Annotated tag' : 'Lightweight tag') +
+                  ` \u2014 ${t.hash.slice(0, 8)}` +
+                  (t.subject ? `\n${t.subject}` : '')
+                }
+                onClick={() => checkout(t.name)}
               >
-                ✕
-              </button>
-            </span>
-          </div>
-        ))}
-        {!stashes.length && <div className="side-empty">No stashes</div>}
+                <span className="ico">🏷</span>
+                <span className="label">{t.name}</span>
+                <span className="hover-actions" onClick={(e) => e.stopPropagation()}>
+                  {remotes.length > 0 && (
+                    <button className="mini-btn" title="Push tag to remote" onClick={() => pushTag(t.name)}>
+                      Push
+                    </button>
+                  )}
+                  <button
+                    className="mini-btn danger"
+                    title="Delete tag"
+                    onClick={() => {
+                      if (confirm(`Delete tag "${t.name}"?`)) deleteTag(t.name)
+                    }}
+                  >
+                    ✕
+                  </button>
+                </span>
+              </div>
+            ))}
+            {!tags.length && <div className="side-empty">No tags</div>}
+          </>
+        )}
+      </div>
+
+      <div className="side-section">
+        <div className="side-head">
+          <span className="side-title" onClick={() => toggle('submodules')}>
+            <span className="chevron">{collapsed.submodules ? '▸' : '▾'}</span>
+            Submodules
+          </span>
+          {submodules.length > 0 && (
+            <button title="Initialize / update all submodules" onClick={() => updateSubmodules()}>
+              ⟳
+            </button>
+          )}
+        </div>
+        {!collapsed.submodules && (
+          <>
+            {submodules.map((s) => (
+              <div
+                key={s.path}
+                className="side-item"
+                title={s.path + ' \u2014 ' + s.hash.slice(0, 8) + (s.describe ? ` (${s.describe})` : '')}
+              >
+                <span className="ico">❏</span>
+                <span className="label">{s.name}</span>
+                {s.state !== 'initialized' && <span className="track">{subStateLabel(s.state)}</span>}
+                <span className="hover-actions" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    className="mini-btn"
+                    title="Initialize / update this submodule"
+                    onClick={() => updateSubmodule(s.path)}
+                  >
+                    Update
+                  </button>
+                </span>
+              </div>
+            ))}
+            {!submodules.length && <div className="side-empty">No submodules</div>}
+          </>
+        )}
+      </div>
+
+      <div className="side-section">
+        <div className="side-head">
+          <span className="side-title" onClick={() => toggle('stashes')}>
+            <span className="chevron">{collapsed.stashes ? '▸' : '▾'}</span>
+            Stashes
+          </span>
+        </div>
+        {!collapsed.stashes && (
+          <>
+            {stashes.map((s) => (
+              <div key={s.ref} className="side-item" title={s.message}>
+                <span className="ico">⚑</span>
+                <span className="label">{s.message}</span>
+                <span className="hover-actions" onClick={(e) => e.stopPropagation()}>
+                  <button className="mini-btn" title="Apply and drop" onClick={() => stashApply(s.ref, true)}>
+                    Pop
+                  </button>
+                  <button className="mini-btn" title="Apply, keep stash" onClick={() => stashApply(s.ref, false)}>
+                    Apply
+                  </button>
+                  <button
+                    className="mini-btn danger"
+                    title="Drop stash"
+                    onClick={() => {
+                      if (confirm(`Drop ${s.ref}?`)) stashDrop(s.ref)
+                    }}
+                  >
+                    ✕
+                  </button>
+                </span>
+              </div>
+            ))}
+            {!stashes.length && <div className="side-empty">No stashes</div>}
+          </>
+        )}
       </div>
 
       {remoteDlg && <AddRemoteDialog onClose={() => setRemoteDlg(false)} />}

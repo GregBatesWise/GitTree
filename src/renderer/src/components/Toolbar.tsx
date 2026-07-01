@@ -97,6 +97,62 @@ function StashDialog({ onClose }: { onClose: () => void }) {
   )
 }
 
+function NewTagDialog({ onClose }: { onClose: () => void }) {
+  const [name, setName] = useState('')
+  const [message, setMessage] = useState('')
+  const createTag = useStore((s) => s.createTag)
+  const busy = useStore((s) => s.busy)
+
+  const submit = async (): Promise<void> => {
+    if (!name.trim()) return
+    const ok = await createTag(name.trim(), message.trim())
+    if (ok) onClose()
+  }
+
+  return (
+    <Modal
+      title="New Tag"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" disabled={!name.trim() || !!busy} onClick={submit}>
+            Create Tag
+          </button>
+        </>
+      }
+    >
+      <label>
+        Tag name
+        <input
+          type="text"
+          autoFocus
+          value={name}
+          placeholder="v1.0.0"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+          }}
+        />
+      </label>
+      <label>
+        Message (optional — creates an annotated tag)
+        <input
+          type="text"
+          value={message}
+          placeholder="Release 1.0.0"
+          onChange={(e) => setMessage(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+          }}
+        />
+      </label>
+    </Modal>
+  )
+}
+
 function TBtn({
   icon,
   label,
@@ -133,9 +189,12 @@ export function Toolbar() {
   const pull = useStore((s) => s.pull)
   const fetchRemote = useStore((s) => s.fetch)
   const refresh = useStore((s) => s.refreshAll)
+  const openInTerminal = useStore((s) => s.openInTerminal)
+  const revealFolder = useStore((s) => s.revealInFileManager)
   const busy = useStore((s) => s.busy)
 
   const [branchOpen, setBranchOpen] = useState(false)
+  const [tagOpen, setTagOpen] = useState(false)
   const [stashOpen, setStashOpen] = useState(false)
 
   const hasRepo = !!active
@@ -159,6 +218,20 @@ export function Toolbar() {
         ))}
       </select>
       <TBtn icon="＋" label="Add" onClick={addRepo} title="Add a local repository" />
+      <TBtn
+        icon="❯"
+        label="Terminal"
+        disabled={!hasRepo}
+        onClick={() => openInTerminal()}
+        title="Open this repository in a terminal"
+      />
+      <TBtn
+        icon="🗁"
+        label="Folder"
+        disabled={!hasRepo}
+        onClick={() => revealFolder()}
+        title="Show this repository in the file manager"
+      />
 
       <div className="tb-sep" />
 
@@ -203,6 +276,13 @@ export function Toolbar() {
         title="Create a branch"
       />
       <TBtn
+        icon="🏷"
+        label="Tag"
+        disabled={disabled}
+        onClick={() => setTagOpen(true)}
+        title="Create a tag"
+      />
+      <TBtn
         icon="⚑"
         label="Stash"
         disabled={disabled}
@@ -222,6 +302,7 @@ export function Toolbar() {
       <TBtn icon="⟲" label="Refresh" disabled={disabled} onClick={() => refresh()} title="Refresh" />
 
       {branchOpen && <NewBranchDialog onClose={() => setBranchOpen(false)} />}
+      {tagOpen && <NewTagDialog onClose={() => setTagOpen(false)} />}
       {stashOpen && <StashDialog onClose={() => setStashOpen(false)} />}
     </div>
   )

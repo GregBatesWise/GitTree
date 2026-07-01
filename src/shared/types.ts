@@ -69,6 +69,24 @@ export interface RemoteInfo {
   pushUrl: string
 }
 
+export interface TagInfo {
+  name: string
+  hash: string // commit the tag refers to (dereferenced for annotated tags)
+  annotated: boolean
+  subject: string // tag message subject (annotated) or target commit subject
+  date: string | null // ISO 8601
+}
+
+export type SubmoduleState = 'initialized' | 'uninitialized' | 'modified' | 'conflict'
+
+export interface SubmoduleInfo {
+  name: string
+  path: string
+  hash: string
+  describe: string | null
+  state: SubmoduleState
+}
+
 export type DiffLineType = 'context' | 'add' | 'del' | 'meta'
 
 export interface DiffLine {
@@ -114,6 +132,8 @@ export interface PullOptions {
 export interface FetchOptions {
   prune?: boolean
 }
+
+export type ResetMode = 'soft' | 'mixed' | 'hard'
 
 export interface GitResult<T = void> {
   ok: boolean

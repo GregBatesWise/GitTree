@@ -7,7 +7,10 @@ import type {
   FileStatus,
   RemoteInfo,
   StashInfo,
-  StatusResult
+  StatusResult,
+  SubmoduleInfo,
+  SubmoduleState,
+  TagInfo
 } from '../../shared/types'
 
 const SEP = '\x1f' // unit separator
@@ -211,6 +214,56 @@ export function parseRemotes(raw: string): RemoteInfo[] {
     else r.pushUrl = url
   }
   return [...map.values()]
+}
+
+export const TAG_FORMAT = [
+  '%(refname:short)',
+  '%(objecttype)',
+  '%(objectname)',
+  '%(*objectname)',
+  '%(creatordate:iso-strict)',
+  '%(contents:subject)',
+  '%(*contents:subject)'
+].join(SEP)
+
+export function parseTags(raw: string): TagInfo[] {
+  const out: TagInfo[] = []
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue
+    const [name, type, obj, derefObj, date, subj, derefSubj] = line.split(SEP)
+    const annotated = type === 'tag'
+    out.push({
+      name,
+      hash: annotated ? derefObj || obj : obj,
+      annotated,
+      subject: (annotated ? subj || derefSubj : subj) || '',
+      date: date || null
+    })
+  }
+  return out
+}
+
+export function parseSubmodules(raw: string): SubmoduleInfo[] {
+  const out: SubmoduleInfo[] = []
+  for (const line of raw.split('\n')) {
+    if (!line) continue
+    const flag = line[0]
+    const m = /^(\S+)\s+(.+?)(?:\s+\((.+)\))?$/.exec(line.slice(1))
+    if (!m) continue
+    const [, hash, path, describe] = m
+    let state: SubmoduleState = 'initialized'
+    if (flag === '-') state = 'uninitialized'
+    else if (flag === '+') state = 'modified'
+    else if (flag === 'U') state = 'conflict'
+    out.push({
+      name: path.split(/[\\/]/).filter(Boolean).pop() || path,
+      path,
+      hash,
+      describe: describe || null,
+      state
+    })
+  }
+  return out
 }
 
 export function parseNameStatus(raw: string): FileChange[] {

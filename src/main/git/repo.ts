@@ -12,8 +12,11 @@ import type {
   PullOptions,
   PushOptions,
   RemoteInfo,
+  ResetMode,
   StashInfo,
-  StatusResult
+  StatusResult,
+  SubmoduleInfo,
+  TagInfo
 } from '../../shared/types'
 
 export async function isGitRepo(path: string): Promise<boolean> {
@@ -32,10 +35,11 @@ export async function status(path: string): Promise<StatusResult> {
   return P.parseStatus(res.stdout)
 }
 
-export async function log(path: string, limit = 500): Promise<CommitInfo[]> {
+export async function log(path: string, limit = 500, ref?: string): Promise<CommitInfo[]> {
+  const scope = ref && ref.trim() ? [ref] : ['--all']
   const res = await runGit(path, [
     'log',
-    '--all',
+    ...scope,
     '--topo-order',
     `--pretty=format:${P.LOG_FORMAT}`,
     '-n',
@@ -68,6 +72,23 @@ export async function remotes(path: string): Promise<RemoteInfo[]> {
   const res = await runGit(path, ['remote', '-v'])
   if (res.code !== 0) return []
   return P.parseRemotes(res.stdout)
+}
+
+export async function tags(path: string): Promise<TagInfo[]> {
+  const res = await runGit(path, [
+    'for-each-ref',
+    '--sort=-creatordate',
+    `--format=${P.TAG_FORMAT}`,
+    'refs/tags'
+  ])
+  if (res.code !== 0) return []
+  return P.parseTags(res.stdout)
+}
+
+export async function submodules(path: string): Promise<SubmoduleInfo[]> {
+  const res = await runGit(path, ['submodule', 'status'])
+  if (res.code !== 0) return []
+  return P.parseSubmodules(res.stdout)
 }
 
 export async function diffWorkingFile(
@@ -236,4 +257,61 @@ export async function addRemote(path: string, name: string, url: string): Promis
 
 export async function removeRemote(path: string, name: string): Promise<void> {
   await gitOk(path, ['remote', 'remove', name])
+}
+
+export async function createTag(
+  path: string,
+  name: string,
+  ref: string | undefined,
+  message: string | undefined
+): Promise<void> {
+  const args = ['tag']
+  if (message && message.trim()) args.push('-a', '-m', message)
+  args.push(name)
+  if (ref) args.push(ref)
+  await gitOk(path, args)
+}
+
+export async function deleteTag(path: string, name: string): Promise<void> {
+  await gitOk(path, ['tag', '-d', name])
+}
+
+export async function pushTag(path: string, remote: string, name: string): Promise<void> {
+  await gitOk(path, ['push', remote, `refs/tags/${name}`])
+}
+
+export async function submoduleUpdate(
+  path: string,
+  init: boolean,
+  paths?: string[]
+): Promise<void> {
+  const args = ['submodule', 'update']
+  if (init) args.push('--init')
+  args.push('--recursive')
+  if (paths && paths.length) args.push('--', ...paths)
+  await gitOk(path, args)
+}
+
+export async function rebase(path: string, onto: string): Promise<void> {
+  await gitOk(path, ['rebase', onto])
+}
+
+export async function revertCommit(path: string, hash: string): Promise<void> {
+  await gitOk(path, ['revert', '--no-edit', hash])
+}
+
+export async function resetTo(path: string, hash: string, mode: ResetMode): Promise<void> {
+  await gitOk(path, ['reset', `--${mode}`, hash])
+}
+
+export async function cherryPick(path: string, hash: string): Promise<void> {
+  await gitOk(path, ['cherry-pick', hash])
+}
+
+export async function restoreFileFromCommit(
+  path: string,
+  hash: string,
+  file: string
+): Promise<void> {
+  await gitOk(path, ['checkout', hash, '--', file])
 }

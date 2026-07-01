@@ -9,8 +9,11 @@ import type {
   GitResult,
   RemoteInfo,
   RepoBookmark,
+  ResetMode,
   StashInfo,
-  StatusResult
+  StatusResult,
+  SubmoduleInfo,
+  TagInfo
 } from '@shared/types'
 
 const api = window.api
@@ -34,6 +37,11 @@ interface AppState {
   branches: BranchInfo[]
   stashes: StashInfo[]
   remotes: RemoteInfo[]
+  tags: TagInfo[]
+  submodules: SubmoduleInfo[]
+
+  historyBranch: string
+  historyQuery: string
 
   selectedCommit: string | null
   commitDetail: CommitDetail | null
@@ -75,7 +83,7 @@ interface AppState {
   fetch: () => Promise<void>
 
   checkoutBranch: (name: string) => Promise<void>
-  createBranch: (name: string, checkoutNew: boolean) => Promise<boolean>
+  createBranch: (name: string, checkoutNew: boolean, startPoint?: string) => Promise<boolean>
   mergeBranch: (name: string) => Promise<void>
   deleteBranch: (name: string, force: boolean) => Promise<void>
 
@@ -85,6 +93,26 @@ interface AppState {
 
   addRemote: (name: string, url: string) => Promise<boolean>
   removeRemote: (name: string) => Promise<void>
+
+  createTag: (name: string, message: string) => Promise<boolean>
+  deleteTag: (name: string) => Promise<void>
+  pushTag: (name: string) => Promise<void>
+
+  updateSubmodules: () => Promise<void>
+  updateSubmodule: (path: string) => Promise<void>
+
+  revealInFileManager: () => Promise<void>
+  openInTerminal: () => Promise<void>
+
+  setHistoryBranch: (ref: string) => Promise<void>
+  setHistoryQuery: (query: string) => void
+  rebaseOnto: (onto: string) => Promise<void>
+  revertCommit: (hash: string) => Promise<void>
+  resetTo: (hash: string, mode: ResetMode) => Promise<void>
+  cherryPick: (hash: string) => Promise<void>
+  restoreFileFromCommit: (hash: string, file: string) => Promise<void>
+  externalDiffCommit: (hash: string, file: string) => Promise<void>
+  copySha: (hash: string) => Promise<void>
 }
 
 export const useStore = create<AppState>((set, get) => {
@@ -119,6 +147,10 @@ export const useStore = create<AppState>((set, get) => {
     branches: [],
     stashes: [],
     remotes: [],
+    tags: [],
+    submodules: [],
+    historyBranch: '',
+    historyQuery: '',
     selectedCommit: null,
     commitDetail: null,
     compareCommit: null,
@@ -150,7 +182,11 @@ export const useStore = create<AppState>((set, get) => {
         commits: [],
         branches: [],
         stashes: [],
-        remotes: []
+        remotes: [],
+        tags: [],
+        submodules: [],
+        historyBranch: '',
+        historyQuery: ''
       })
       await get().refreshAll()
     },
@@ -184,6 +220,10 @@ export const useStore = create<AppState>((set, get) => {
             branches: [],
             stashes: [],
             remotes: [],
+            tags: [],
+            submodules: [],
+            historyBranch: '',
+            historyQuery: '',
             selectedCommit: null,
             commitDetail: null,
             compareCommit: null,
@@ -198,20 +238,24 @@ export const useStore = create<AppState>((set, get) => {
       const p = get().activeRepoPath
       if (!p) return
       set({ loading: true })
-      const [st, lg, br, sh, rm] = await Promise.all([
+      const [st, lg, br, sh, rm, tg, sm] = await Promise.all([
         api.status(p),
-        api.log(p, 500),
+        api.log(p, 500, get().historyBranch || undefined),
         api.branches(p),
         api.stashes(p),
-        api.remotes(p)
+        api.remotes(p),
+        api.tags(p),
+        api.submodules(p)
       ])
-      const firstErr = [st, lg, br, sh, rm].find((r) => !r.ok)
+      const firstErr = [st, lg, br, sh, rm, tg, sm].find((r) => !r.ok)
       set({
         status: st.ok ? (st.data as StatusResult) : null,
         commits: lg.ok ? (lg.data as CommitInfo[]) : [],
         branches: br.ok ? (br.data as BranchInfo[]) : [],
         stashes: sh.ok ? (sh.data as StashInfo[]) : [],
         remotes: rm.ok ? (rm.data as RemoteInfo[]) : [],
+        tags: tg.ok ? (tg.data as TagInfo[]) : [],
+        submodules: sm.ok ? (sm.data as SubmoduleInfo[]) : [],
         loading: false,
         error: firstErr ? firstErr.error || 'Failed to load repository' : get().error
       })
@@ -421,10 +465,12 @@ export const useStore = create<AppState>((set, get) => {
         await get().refreshAll()
     },
 
-    createBranch: async (name, checkoutNew) => {
+    createBranch: async (name, checkoutNew, startPoint) => {
       const p = get().activeRepoPath
       if (!p) return false
-      const ok = await runAction('Creating branch', () => api.createBranch(p, name, checkoutNew))
+      const ok = await runAction('Creating branch', () =>
+        api.createBranch(p, name, checkoutNew, startPoint)
+      )
       if (ok) await get().refreshAll()
       return ok
     },
@@ -481,6 +527,130 @@ export const useStore = create<AppState>((set, get) => {
       if (!p) return
       if (await runAction('Removing remote', () => api.removeRemote(p, name)))
         await get().refreshAll()
+    },
+
+    createTag: async (name, message) => {
+      const p = get().activeRepoPath
+      if (!p) return false
+      const ok = await runAction('Creating tag', () =>
+        api.createTag(p, name, undefined, message || undefined)
+      )
+      if (ok) await get().refreshAll()
+      return ok
+    },
+
+    deleteTag: async (name) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      if (await runAction(`Deleting tag ${name}`, () => api.deleteTag(p, name)))
+        await get().refreshAll()
+    },
+
+    pushTag: async (name) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      const remotes = get().remotes
+      const remote = remotes.find((r) => r.name === 'origin')?.name ?? remotes[0]?.name
+      if (!remote) {
+        set({ error: 'No remote configured to push the tag to' })
+        return
+      }
+      await runAction(`Pushing tag ${name}`, () => api.pushTag(p, remote, name), `Pushed ${name}`)
+    },
+
+    updateSubmodules: async () => {
+      const p = get().activeRepoPath
+      if (!p) return
+      if (
+        await runAction('Updating submodules', () => api.submoduleUpdate(p, true), 'Submodules updated')
+      )
+        await get().refreshAll()
+    },
+
+    updateSubmodule: async (path) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      if (await runAction(`Updating ${path}`, () => api.submoduleUpdate(p, true, [path])))
+        await get().refreshAll()
+    },
+
+    revealInFileManager: async () => {
+      const p = get().activeRepoPath
+      if (!p) return
+      await runAction('Opening folder', () => api.revealInFileManager(p))
+    },
+
+    openInTerminal: async () => {
+      const p = get().activeRepoPath
+      if (!p) return
+      await runAction('Opening terminal', () => api.openInTerminal(p))
+    },
+
+    setHistoryBranch: async (ref) => {
+      set({ historyBranch: ref })
+      const p = get().activeRepoPath
+      if (!p) return
+      set({ loading: true })
+      const lg = await api.log(p, 500, ref || undefined)
+      set({
+        commits: lg.ok ? (lg.data as CommitInfo[]) : [],
+        loading: false,
+        error: lg.ok ? get().error : lg.error || 'Failed to load history'
+      })
+    },
+
+    setHistoryQuery: (query) => set({ historyQuery: query }),
+
+    rebaseOnto: async (onto) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      if (await runAction(`Rebasing onto ${onto.slice(0, 7)}`, () => api.rebase(p, onto), 'Rebased'))
+        await get().refreshAll()
+    },
+
+    revertCommit: async (hash) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      if (await runAction('Reverting commit', () => api.revertCommit(p, hash), 'Commit reverted'))
+        await get().refreshAll()
+    },
+
+    resetTo: async (hash, mode) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      if (await runAction(`Resetting (${mode})`, () => api.resetTo(p, hash, mode), 'Branch reset'))
+        await get().refreshAll()
+    },
+
+    cherryPick: async (hash) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      if (await runAction('Cherry-picking', () => api.cherryPick(p, hash), 'Cherry-picked'))
+        await get().refreshAll()
+    },
+
+    restoreFileFromCommit: async (hash, file) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      if (
+        await runAction(
+          'Resetting file',
+          () => api.restoreFileFromCommit(p, hash, file),
+          'File reset to commit'
+        )
+      )
+        await get().refreshAll()
+    },
+
+    externalDiffCommit: async (hash, file) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      await runAction('Opening external diff', () => api.externalDiffCommit(p, hash, file))
+    },
+
+    copySha: async (hash) => {
+      await api.copyText(hash)
+      set({ toast: 'SHA copied to clipboard' })
     }
   }
 })

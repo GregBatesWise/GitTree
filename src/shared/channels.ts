@@ -5,12 +5,16 @@ export const CH = {
   repoAdd: 'repos:add',
   repoRemove: 'repos:remove',
   openFolder: 'dialog:openFolder',
+  revealInFileManager: 'shell:reveal',
+  openInTerminal: 'shell:terminal',
 
   status: 'git:status',
   log: 'git:log',
   branches: 'git:branches',
   stashes: 'git:stashes',
   remotes: 'git:remotes',
+  tags: 'git:tags',
+  submodules: 'git:submodules',
   diffWorking: 'git:diffWorking',
   commitFiles: 'git:commitFiles',
   commitFileDiff: 'git:commitFileDiff',
@@ -34,7 +38,18 @@ export const CH = {
   stashApply: 'git:stashApply',
   stashDrop: 'git:stashDrop',
   addRemote: 'git:addRemote',
-  removeRemote: 'git:removeRemote'
+  removeRemote: 'git:removeRemote',
+  createTag: 'git:createTag',
+  deleteTag: 'git:deleteTag',
+  pushTag: 'git:pushTag',
+  submoduleUpdate: 'git:submoduleUpdate',
+  rebase: 'git:rebase',
+  revertCommit: 'git:revertCommit',
+  resetTo: 'git:resetTo',
+  cherryPick: 'git:cherryPick',
+  restoreFileFromCommit: 'git:restoreFileFromCommit',
+  externalDiffCommit: 'git:externalDiffCommit',
+  copyText: 'clipboard:writeText'
 } as const
 
 export type ChannelName = (typeof CH)[keyof typeof CH]
