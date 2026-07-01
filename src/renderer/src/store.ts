@@ -9,6 +9,7 @@ import type {
   GitResult,
   RemoteInfo,
   RepoBookmark,
+  RepoGroup,
   ResetMode,
   StashInfo,
   StatusResult,
@@ -29,6 +30,7 @@ export interface FileSelection {
 
 interface AppState {
   repos: RepoBookmark[]
+  groups: RepoGroup[]
   activeRepoPath: string | null
   view: MainView
 
@@ -60,6 +62,11 @@ interface AppState {
   selectRepo: (path: string) => Promise<void>
   addRepoViaDialog: () => Promise<void>
   removeRepo: (id: string) => Promise<void>
+  loadGroups: () => Promise<void>
+  createGroup: (name: string) => Promise<void>
+  renameGroup: (id: string, name: string) => Promise<void>
+  deleteGroup: (id: string) => Promise<void>
+  assignGroup: (repoId: string, groupId: string | null) => Promise<void>
   refreshAll: () => Promise<void>
   setView: (view: MainView) => void
   dismissError: () => void
@@ -145,6 +152,7 @@ export const useStore = create<AppState>((set, get) => {
 
   return {
     repos: [],
+    groups: [],
     activeRepoPath: null,
     view: 'working',
     status: null,
@@ -170,8 +178,13 @@ export const useStore = create<AppState>((set, get) => {
 
     init: async () => {
       const repos = await api.listRepos()
-      set({ repos })
-      if (repos.length) await get().selectRepo(repos[0].path)
+      const groups = await api.listGroups()
+      const settings = await api.getSettings()
+      set({ repos, groups })
+      if (repos.length) {
+        const last = repos.find((r) => r.path === settings.lastRepoPath)
+        await get().selectRepo((last ?? repos[0]).path)
+      }
     },
 
     selectRepo: async (path) => {
@@ -193,6 +206,11 @@ export const useStore = create<AppState>((set, get) => {
         historyBranch: '',
         historyQuery: ''
       })
+      const repo = get().repos.find((r) => r.path === path)
+      const groupId = repo
+        ? (get().groups.find((g) => g.repoIds.includes(repo.id))?.id ?? null)
+        : null
+      await api.setSettings({ lastRepoPath: path, lastGroupId: groupId ?? undefined })
       await get().refreshAll()
     },
 
@@ -215,6 +233,7 @@ export const useStore = create<AppState>((set, get) => {
       const removed = get().repos.find((r) => r.id === id)
       const wasActive = removed && removed.path === get().activeRepoPath
       set({ repos })
+      await get().loadGroups()
       if (wasActive) {
         if (repos.length) await get().selectRepo(repos[0].path)
         else
@@ -237,6 +256,31 @@ export const useStore = create<AppState>((set, get) => {
             diff: null
           })
       }
+    },
+
+    loadGroups: async () => {
+      const groups = await api.listGroups()
+      set({ groups })
+    },
+
+    createGroup: async (name) => {
+      await api.createGroup(name)
+      await get().loadGroups()
+    },
+
+    renameGroup: async (id, name) => {
+      await api.renameGroup(id, name)
+      await get().loadGroups()
+    },
+
+    deleteGroup: async (id) => {
+      await api.deleteGroup(id)
+      await get().loadGroups()
+    },
+
+    assignGroup: async (repoId, groupId) => {
+      await api.assignGroup(repoId, groupId)
+      await get().loadGroups()
     },
 
     refreshAll: async () => {

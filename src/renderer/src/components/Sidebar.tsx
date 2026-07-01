@@ -212,8 +212,8 @@ export function Sidebar({ width }: { width?: number }) {
               <div
                 key={b.name}
                 className={'side-item' + (b.current ? ' current' : '')}
-                title={b.current ? b.name + ' (current)' : 'Check out ' + b.name}
-                onClick={() => {
+                title={b.current ? b.name + ' (current)' : 'Double-click to check out ' + b.name}
+                onDoubleClick={() => {
                   if (!b.current) checkout(b.name)
                 }}
                 onContextMenu={(e) => {

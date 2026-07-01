@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { CH } from '../shared/channels'
 import type {
   ApplyPatchOptions,
+  AppSettings,
   FetchOptions,
   GitResult,
   PullOptions,
@@ -94,6 +95,17 @@ export function registerIpc(): void {
   )
 
   ipcMain.handle(CH.repoRemove, (_e, id: string) => store.removeRepo(id))
+
+  ipcMain.handle(CH.groupsList, () => store.listGroups())
+  ipcMain.handle(CH.groupCreate, (_e, name: string) => store.createGroup(name))
+  ipcMain.handle(CH.groupRename, (_e, id: string, name: string) => store.renameGroup(id, name))
+  ipcMain.handle(CH.groupDelete, (_e, id: string) => store.deleteGroup(id))
+  ipcMain.handle(CH.groupAssign, (_e, repoId: string, groupId: string | null) =>
+    store.assignRepoToGroup(repoId, groupId)
+  )
+
+  ipcMain.handle(CH.settingsGet, () => store.getSettings())
+  ipcMain.handle(CH.settingsSet, (_e, patch: Partial<AppSettings>) => store.setSettings(patch))
 
   ipcMain.handle(CH.openFolder, async () => {
     const win = BrowserWindow.getFocusedWindow()

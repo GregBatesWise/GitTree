@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { Modal } from './Dialog'
+import { GroupsDialog } from './GroupsDialog'
 
 function NewBranchDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('')
@@ -161,7 +162,7 @@ function TBtn({
   onClick,
   title
 }: {
-  icon: string
+  icon: ReactNode
   label: string
   count?: number
   disabled?: boolean
@@ -179,6 +180,7 @@ function TBtn({
 
 export function Toolbar() {
   const repos = useStore((s) => s.repos)
+  const groups = useStore((s) => s.groups)
   const active = useStore((s) => s.activeRepoPath)
   const selectRepo = useStore((s) => s.selectRepo)
   const addRepo = useStore((s) => s.addRepoViaDialog)
@@ -196,12 +198,16 @@ export function Toolbar() {
   const [branchOpen, setBranchOpen] = useState(false)
   const [tagOpen, setTagOpen] = useState(false)
   const [stashOpen, setStashOpen] = useState(false)
+  const [groupsOpen, setGroupsOpen] = useState(false)
 
   const hasRepo = !!active
   const ahead = status?.ahead ?? 0
   const behind = status?.behind ?? 0
   const noUpstream = !!(hasRepo && status && status.branch && !status.upstream)
   const disabled = !hasRepo || !!busy
+
+  const groupedIds = new Set(groups.flatMap((g) => g.repoIds))
+  const ungrouped = repos.filter((r) => !groupedIds.has(r.id))
 
   return (
     <div className="toolbar">
@@ -211,13 +217,46 @@ export function Toolbar() {
         onChange={(e) => selectRepo(e.target.value)}
       >
         {!repos.length && <option value="">No repositories</option>}
-        {repos.map((r) => (
-          <option key={r.id} value={r.path}>
-            {r.name}
-          </option>
-        ))}
+        {groups.length === 0
+          ? repos.map((r) => (
+              <option key={r.id} value={r.path}>
+                {r.name}
+              </option>
+            ))
+          : groups.map((g) => {
+              const members = repos.filter((r) => g.repoIds.includes(r.id))
+              if (!members.length) return null
+              return (
+                <optgroup key={g.id} label={g.name}>
+                  {members.map((r) => (
+                    <option key={r.id} value={r.path}>
+                      {r.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )
+            })}
+        {groups.length > 0 && ungrouped.length > 0 && (
+          <optgroup label="Ungrouped">
+            {ungrouped.map((r) => (
+              <option key={r.id} value={r.path}>
+                {r.name}
+              </option>
+            ))}
+          </optgroup>
+        )}
       </select>
       <TBtn icon="＋" label="Add" onClick={addRepo} title="Add a local repository" />
+      <TBtn
+        icon={
+          <svg viewBox="0 -960 960 960" width="16" height="16" fill="currentColor">
+            <path d="M312-240q-29.7 0-50.85-21.15Q240-282.3 240-312v-480q0-29.7 21.15-50.85Q282.3-864 312-864h480q29.7 0 50.85 21.15Q864-821.7 864-792v480q0 29.7-21.15 50.85Q821.7-240 792-240H312Zm0-72h480v-360H528v-120H312v480ZM168-96q-29.7 0-50.85-21.15Q96-138.3 96-168v-552h72v552h552v72H168Zm144-696v480-480Z" />
+          </svg>
+        }
+        label="Groups"
+        onClick={() => setGroupsOpen(true)}
+        title="Manage repository groups"
+      />
       <TBtn
         icon="❯"
         label="Terminal"
@@ -304,6 +343,7 @@ export function Toolbar() {
       {branchOpen && <NewBranchDialog onClose={() => setBranchOpen(false)} />}
       {tagOpen && <NewTagDialog onClose={() => setTagOpen(false)} />}
       {stashOpen && <StashDialog onClose={() => setStashOpen(false)} />}
+      {groupsOpen && <GroupsDialog onClose={() => setGroupsOpen(false)} />}
     </div>
   )
 }

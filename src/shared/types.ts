@@ -6,6 +6,17 @@ export interface RepoBookmark {
   path: string
 }
 
+export interface RepoGroup {
+  id: string
+  name: string
+  repoIds: string[]
+}
+
+export interface AppSettings {
+  lastRepoPath?: string
+  lastGroupId?: string
+}
+
 export interface CommitInfo {
   hash: string
   shortHash: string

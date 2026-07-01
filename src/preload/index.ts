@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { CH } from '../shared/channels'
 import type {
   ApplyPatchOptions,
+  AppSettings,
   BranchInfo,
   CommitDetail,
   CommitInfo,
@@ -13,6 +14,7 @@ import type {
   PushOptions,
   RemoteInfo,
   RepoBookmark,
+  RepoGroup,
   ResetMode,
   StashInfo,
   StatusResult,
@@ -24,6 +26,16 @@ const api = {
   listRepos: (): Promise<RepoBookmark[]> => ipcRenderer.invoke(CH.reposList),
   addRepo: (path: string): Promise<GitResult<RepoBookmark>> => ipcRenderer.invoke(CH.repoAdd, path),
   removeRepo: (id: string): Promise<void> => ipcRenderer.invoke(CH.repoRemove, id),
+  listGroups: (): Promise<RepoGroup[]> => ipcRenderer.invoke(CH.groupsList),
+  createGroup: (name: string): Promise<RepoGroup> => ipcRenderer.invoke(CH.groupCreate, name),
+  renameGroup: (id: string, name: string): Promise<void> =>
+    ipcRenderer.invoke(CH.groupRename, id, name),
+  deleteGroup: (id: string): Promise<void> => ipcRenderer.invoke(CH.groupDelete, id),
+  assignGroup: (repoId: string, groupId: string | null): Promise<void> =>
+    ipcRenderer.invoke(CH.groupAssign, repoId, groupId),
+  getSettings: (): Promise<AppSettings> => ipcRenderer.invoke(CH.settingsGet),
+  setSettings: (patch: Partial<AppSettings>): Promise<AppSettings> =>
+    ipcRenderer.invoke(CH.settingsSet, patch),
   openFolder: (): Promise<string | null> => ipcRenderer.invoke(CH.openFolder),
   revealInFileManager: (p: string): Promise<GitResult> =>
     ipcRenderer.invoke(CH.revealInFileManager, p),

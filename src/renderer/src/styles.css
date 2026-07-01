@@ -43,6 +43,11 @@ body {
   overflow: hidden;
 }
 
+input,
+textarea {
+  user-select: text;
+}
+
 button {
   font-family: inherit;
   cursor: pointer;
@@ -129,6 +134,14 @@ button {
 .tbtn .ico {
   font-size: 16px;
   line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+}
+
+.tbtn .ico svg {
+  display: block;
 }
 
 .tbtn .lbl {
@@ -447,6 +460,8 @@ body.resizing {
 .detail-meta {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-soft);
+  user-select: text;
+  cursor: text;
 }
 
 .detail-meta .subject {
@@ -706,6 +721,8 @@ body.resizing {
   padding: 0 8px;
   flex: 1;
   white-space: pre;
+  user-select: text;
+  cursor: text;
 }
 
 .diff-line.add .content {
@@ -783,6 +800,68 @@ body.resizing {
 .btn-sm {
   padding: 2px 8px;
   font-size: 11px;
+}
+
+/* ---------- Repository groups manager ---------- */
+.group-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.group-add {
+  display: flex;
+  gap: 8px;
+}
+
+.group-add input {
+  flex: 1;
+}
+
+.group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.group-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-item .group-name {
+  flex: 1;
+}
+
+.group-item .group-count {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.group-assign-title {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.assign-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.assign-row .assign-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assign-row select {
+  width: 150px;
 }
 
 /* ---------- Status bar / toast / error ---------- */
