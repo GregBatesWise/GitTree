@@ -1,6 +1,6 @@
 {
   "name": "git-desktop",
-  "version": "0.2.1",
+  "version": "0.4.0",
   "productName": "GitTree",
   "description": "A SourceTree-like Git desktop client built with Electron + React",
   "author": "GitTree",
@@ -30,8 +30,5 @@
     "typescript": "^5.6.2",
     "vite": "^5.4.8",
     "zustand": "^4.5.5"
-  },
-  "dependencies": {
-    "git-desktop": "file:"
   }
 }

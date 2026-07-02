@@ -9,34 +9,34 @@
   <rect width="256" height="256" rx="44" fill="url(#bg)"/>
 
   <!-- Main branch vertical line -->
-  <line x1="88" y1="50" x2="88" y2="206" stroke="#6c63ff" stroke-width="9" stroke-linecap="round"/>
+  <line x1="88" y1="50" x2="88" y2="206" stroke="#6c63ff" stroke-width="7" stroke-linecap="round"/>
 
   <!-- Branch-out curve: main top commit → feature top commit -->
-  <path d="M88,50 C88,90 164,76 164,116" stroke="#d06bff" stroke-width="9" fill="none" stroke-linecap="round"/>
+  <path d="M88,50 C88,90 164,76 164,116" stroke="#d06bff" stroke-width="7" fill="none" stroke-linecap="round"/>
 
   <!-- Feature branch vertical segment -->
-  <line x1="164" y1="116" x2="164" y2="162" stroke="#d06bff" stroke-width="9" stroke-linecap="round"/>
+  <line x1="164" y1="116" x2="164" y2="162" stroke="#d06bff" stroke-width="7" stroke-linecap="round"/>
 
   <!-- Merge curve: feature bottom commit → main bottom commit -->
-  <path d="M164,162 C164,194 88,180 88,206" stroke="#d06bff" stroke-width="9" fill="none" stroke-linecap="round"/>
+  <path d="M164,162 C164,194 88,180 88,206" stroke="#d06bff" stroke-width="7" fill="none" stroke-linecap="round"/>
 
   <!-- Main commit 1 (top) -->
-  <circle cx="88" cy="50" r="15" fill="#0e0f1e" stroke="#6c63ff" stroke-width="6"/>
-  <circle cx="88" cy="50" r="6" fill="#6c63ff"/>
+  <circle cx="88" cy="50" r="17" fill="#0e0f1e" stroke="#6c63ff" stroke-width="6"/>
+  <circle cx="88" cy="50" r="7" fill="#6c63ff"/>
 
   <!-- Main commit 2 (middle) -->
-  <circle cx="88" cy="128" r="15" fill="#0e0f1e" stroke="#6c63ff" stroke-width="6"/>
-  <circle cx="88" cy="128" r="6" fill="#6c63ff"/>
+  <circle cx="88" cy="128" r="17" fill="#0e0f1e" stroke="#6c63ff" stroke-width="6"/>
+  <circle cx="88" cy="128" r="7" fill="#6c63ff"/>
 
   <!-- Main commit 3 (bottom) -->
-  <circle cx="88" cy="206" r="15" fill="#0e0f1e" stroke="#6c63ff" stroke-width="6"/>
-  <circle cx="88" cy="206" r="6" fill="#6c63ff"/>
+  <circle cx="88" cy="206" r="17" fill="#0e0f1e" stroke="#6c63ff" stroke-width="6"/>
+  <circle cx="88" cy="206" r="7" fill="#6c63ff"/>
 
   <!-- Feature commit 1 -->
-  <circle cx="164" cy="116" r="15" fill="#0e0f1e" stroke="#d06bff" stroke-width="6"/>
-  <circle cx="164" cy="116" r="6" fill="#d06bff"/>
+  <circle cx="164" cy="116" r="17" fill="#0e0f1e" stroke="#d06bff" stroke-width="6"/>
+  <circle cx="164" cy="116" r="7" fill="#d06bff"/>
 
   <!-- Feature commit 2 -->
-  <circle cx="164" cy="162" r="15" fill="#0e0f1e" stroke="#d06bff" stroke-width="6"/>
-  <circle cx="164" cy="162" r="6" fill="#d06bff"/>
+  <circle cx="164" cy="162" r="17" fill="#0e0f1e" stroke="#d06bff" stroke-width="6"/>
+  <circle cx="164" cy="162" r="7" fill="#d06bff"/>
 </svg>

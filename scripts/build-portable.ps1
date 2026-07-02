@@ -1,15 +1,17 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Bumps the minor version, builds GitTree, packages Windows executables, and
-    copies the portable GitTree.exe to the Desktop.
+    Bumps the minor version, builds GitTree, packages Windows executables, installs
+    the portable GitTree.exe to the user's Programs folder, and creates a Desktop shortcut.
 
 .DESCRIPTION
     Each run:
       1. Bumps the version in package.json (minor by default: 0.2.0 -> 0.3.0).
       2. Builds the main / preload / renderer bundles with electron-vite.
       3. Packages both the NSIS installer and portable .exe with electron-builder.
-      4. Replaces any previous GitTree.exe on the Desktop with the new build.
+      4. Installs the portable GitTree.exe to %LOCALAPPDATA%\Programs\GitTree and
+         (re)creates a GitTree.lnk shortcut on the Desktop pointing to it. Any old
+         GitTree*.exe copied directly onto the Desktop by previous builds is removed.
 
     The version bump edits package.json only - it does NOT create a git commit or tag.
     The version is embedded in the executable's file/product version metadata.
@@ -19,7 +21,7 @@
 
 .EXAMPLE
     ./scripts/build-portable.ps1
-    Bumps the minor version and copies GitTree.exe to the Desktop.
+    Bumps the minor version, installs to Programs, and refreshes the Desktop shortcut.
 
 .EXAMPLE
     ./scripts/build-portable.ps1 -Bump patch
@@ -71,20 +73,38 @@ try {
         throw "Portable exe not found at '$artifact'. Check electron-builder output."
     }
 
-    # Replace any previous GitTree exe on the Desktop (including old versioned names).
+    # Install location: %LOCALAPPDATA%\Programs\GitTree (per-user, no admin needed).
+    $installDir = Join-Path $env:LOCALAPPDATA 'Programs\GitTree'
+    New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+
+    $installedExe = Join-Path $installDir 'GitTree.exe'
+    Write-Host "==> Installing to $installedExe" -ForegroundColor Cyan
+    Copy-Item -LiteralPath $artifact -Destination $installedExe -Force
+
+    # Remove any legacy GitTree*.exe copies left directly on the Desktop by old builds.
     $desktop = [Environment]::GetFolderPath('Desktop')
     Get-ChildItem -Path $desktop -Filter 'GitTree*.exe' -ErrorAction SilentlyContinue |
         ForEach-Object {
-            Write-Host "==> Removing old Desktop build: $($_.Name)" -ForegroundColor Cyan
+            Write-Host "==> Removing old Desktop exe: $($_.Name)" -ForegroundColor Cyan
             Remove-Item -LiteralPath $_.FullName -Force
         }
 
-    $dest = Join-Path $desktop 'GitTree.exe'
-    Copy-Item -LiteralPath $artifact -Destination $dest -Force
+    # Create / refresh a Desktop shortcut pointing at the installed exe.
+    $shortcutPath = Join-Path $desktop 'GitTree.lnk'
+    Write-Host "==> Creating Desktop shortcut: $shortcutPath" -ForegroundColor Cyan
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $installedExe
+    $shortcut.WorkingDirectory = $installDir
+    $shortcut.IconLocation = $installedExe
+    $shortcut.Description = "GitTree $version"
+    $shortcut.Save()
+    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
 
     Write-Host ''
-    Write-Host "GitTree $version published to Desktop." -ForegroundColor Green
-    Write-Host "    $dest" -ForegroundColor Green
+    Write-Host "GitTree $version installed." -ForegroundColor Green
+    Write-Host "    App:      $installedExe" -ForegroundColor Green
+    Write-Host "    Shortcut: $shortcutPath" -ForegroundColor Green
 }
 finally {
     Pop-Location

@@ -40,68 +40,70 @@ export function DiffViewer() {
             {diff?.binary ? 'Binary file — no text diff' : 'No changes to display'}
           </div>
         ) : (
-          diff.hunks.map((h, hi) => (
-            <div key={hi} className="diff-hunk">
-              <div className="diff-line diff-hunk-head">
-                <span className="gutter" />
-                <span className="gutter" />
-                <span className="content">{h.header}</span>
-                {hunkActions && (
-                  <span className="hunk-actions">
-                    {sel.staged ? (
-                      <button
-                        className="mini-btn"
-                        title="Unstage this hunk"
-                        onClick={() => unstageHunk(buildHunkPatch(diff.path, h))}
-                      >
-                        Unstage Hunk
-                      </button>
-                    ) : (
-                      <>
+          <div className="diff-body">
+            {diff.hunks.map((h, hi) => (
+              <div key={hi} className="diff-hunk">
+                <div className="diff-line diff-hunk-head">
+                  <span className="gutter" />
+                  <span className="gutter" />
+                  <span className="content">{h.header}</span>
+                  {hunkActions && (
+                    <span className="hunk-actions">
+                      {sel.staged ? (
                         <button
                           className="mini-btn"
-                          title="Stage this hunk"
-                          onClick={() => stageHunk(buildHunkPatch(diff.path, h))}
+                          title="Unstage this hunk"
+                          onClick={() => unstageHunk(buildHunkPatch(diff.path, h))}
                         >
-                          Stage Hunk
+                          Unstage Hunk
                         </button>
-                        <button
-                          className="mini-btn danger"
-                          title="Discard this hunk"
-                          onClick={() => {
-                            if (confirm('Discard this hunk? This cannot be undone.'))
-                              discardHunk(buildHunkPatch(diff.path, h))
-                          }}
-                        >
-                          Discard Hunk
-                        </button>
-                      </>
-                    )}
-                  </span>
-                )}
-              </div>
-              {h.lines.map((l, li) => (
-                <div
-                  key={li}
-                  className={
-                    'diff-line' +
-                    (l.type === 'add'
-                      ? ' add'
-                      : l.type === 'del'
-                        ? ' del'
-                        : l.type === 'meta'
-                          ? ' meta'
-                          : '')
-                  }
-                >
-                  <span className="gutter">{l.oldNumber ?? ''}</span>
-                  <span className="gutter">{l.newNumber ?? ''}</span>
-                  <span className="content">{l.text}</span>
-                  <span className="sign">{marker(l.type)}</span>
+                      ) : (
+                        <>
+                          <button
+                            className="mini-btn"
+                            title="Stage this hunk"
+                            onClick={() => stageHunk(buildHunkPatch(diff.path, h))}
+                          >
+                            Stage Hunk
+                          </button>
+                          <button
+                            className="mini-btn danger"
+                            title="Discard this hunk"
+                            onClick={() => {
+                              if (confirm('Discard this hunk? This cannot be undone.'))
+                                discardHunk(buildHunkPatch(diff.path, h))
+                            }}
+                          >
+                            Discard Hunk
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  )}
                 </div>
-              ))}
-            </div>
-          ))
+                {h.lines.map((l, li) => (
+                  <div
+                    key={li}
+                    className={
+                      'diff-line' +
+                      (l.type === 'add'
+                        ? ' add'
+                        : l.type === 'del'
+                          ? ' del'
+                          : l.type === 'meta'
+                            ? ' meta'
+                            : '')
+                    }
+                  >
+                    <span className="gutter">{l.oldNumber ?? ''}</span>
+                    <span className="gutter">{l.newNumber ?? ''}</span>
+                    <span className="content">{l.text}</span>
+                    <span className="sign">{marker(l.type)}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>

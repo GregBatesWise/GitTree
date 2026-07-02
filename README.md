@@ -48,7 +48,7 @@ That's it. Each run automatically:
 | `GitTree-setup.exe` | NSIS installer — lets the user choose the install directory; creates Start Menu and Desktop shortcuts. |
 | `GitTree.exe` | Self-contained portable executable — no installation required; just run it. |
 
-4. Copies `GitTree.exe` to your **Desktop**, replacing any previous build.
+4. Installs `GitTree.exe` to `%LOCALAPPDATA%\Programs\GitTree` and creates (or refreshes) a **GitTree** shortcut on your Desktop pointing to it. Any old `GitTree.exe` left directly on the Desktop by previous builds is removed.
 
 > **First-time setup:** run `npm run build:icon` once to generate `build/icon.ico` from `build/icon.svg` before your first build. You only need to repeat this if you change the icon.
 

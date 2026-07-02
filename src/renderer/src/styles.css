@@ -15,10 +15,10 @@
   --yellow: #e5c07b;
   --purple: #c678dd;
   --cyan: #56b6c2;
-  --add-bg: rgba(152, 195, 121, 0.12);
-  --add-gutter: rgba(152, 195, 121, 0.25);
-  --del-bg: rgba(224, 108, 117, 0.12);
-  --del-gutter: rgba(224, 108, 117, 0.25);
+  --add-bg: rgba(152, 195, 121, 0.28);
+  --add-gutter: rgba(152, 195, 121, 0.45);
+  --del-bg: rgba(224, 108, 117, 0.28);
+  --del-gutter: rgba(224, 108, 117, 0.45);
   --mono: 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
   --sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
@@ -692,6 +692,13 @@ body.resizing {
   line-height: 18px;
 }
 
+/* Size to the widest line so every row (and its right-sticky sign) spans the
+   full horizontal scroll width, keeping the +/- column pinned to the right. */
+.diff-body {
+  width: max-content;
+  min-width: 100%;
+}
+
 .diff-hunk-head {
   color: var(--cyan);
   background: var(--panel);
@@ -749,6 +756,7 @@ body.resizing {
 .diff-line .sign {
   position: sticky;
   right: 0;
+  z-index: 1;
   flex: 0 0 20px;
   text-align: center;
   font-weight: 700;
@@ -756,14 +764,15 @@ body.resizing {
   color: var(--text-dim);
   background: var(--bg);
   border-left: 1px solid var(--border-soft);
+  box-shadow: -4px 0 6px -4px rgba(0, 0, 0, 0.55);
 }
 .diff-line.add .sign {
   color: var(--green);
-  background: var(--add-gutter);
+  background: var(--add-gutter), var(--bg);
 }
 .diff-line.del .sign {
   color: var(--red);
-  background: var(--del-gutter);
+  background: var(--del-gutter), var(--bg);
 }
 
 /* ---------- Generic buttons ---------- */
@@ -874,16 +883,33 @@ body.resizing {
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 24px;
+  height: 28px;
   padding: 0 12px;
   background: var(--panel);
   border-top: 1px solid var(--border);
   font-size: 11px;
   color: var(--text-dim);
+  overflow: hidden;
 }
 
 .statusbar .spin {
   color: var(--accent);
+  font-weight: 600;
+  transform-origin: left center;
+  display: inline-block;
+  animation: status-pulse 1s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.75;
+  }
+  50% {
+    transform: scale(1.45);
+    opacity: 1;
+  }
 }
 
 .error-bar {
