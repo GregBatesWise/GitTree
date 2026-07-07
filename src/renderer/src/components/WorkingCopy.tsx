@@ -1,6 +1,7 @@
-import { useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useStore } from '../store'
 import { DiffViewer } from './DiffViewer'
+import { useResizable } from '../lib/useResizable'
 import type { FileChange } from '@shared/types'
 
 type Side = 'staged' | 'unstaged'
@@ -79,8 +80,20 @@ function CommitBox() {
   const [pushOnCommit, setPushOnCommit] = useState(false)
   const status = useStore((s) => s.status)
   const remotes = useStore((s) => s.remotes)
+  const groups = useStore((s) => s.groups)
+  const repos = useStore((s) => s.repos)
+  const active = useStore((s) => s.activeRepoPath)
   const commit = useStore((s) => s.commit)
   const busy = useStore((s) => s.busy)
+
+  // The active repo's group can define a feature id that is appended to every commit.
+  const featureSuffix = useMemo(() => {
+    const repo = repos.find((r) => r.path === active)
+    if (!repo) return ''
+    const id = groups.find((g) => g.repoIds.includes(repo.id))?.featureId?.trim()
+    if (!id) return ''
+    return id.startsWith('#') ? id : `#${id}`
+  }, [groups, repos, active])
 
   const stagedCount = status?.staged.length ?? 0
   const canPush = remotes.length > 0
@@ -88,7 +101,10 @@ function CommitBox() {
   const canCommit = message.trim().length > 0 && (stagedCount > 0 || amend) && !busy
 
   const onCommit = async (): Promise<void> => {
-    const ok = await commit(message.trim(), amend, willPush)
+    const base = message.trim()
+    const finalMessage =
+      featureSuffix && !base.includes(featureSuffix) ? `${base} ${featureSuffix}` : base
+    const ok = await commit(finalMessage, amend, willPush)
     if (ok) {
       setMessage('')
       setAmend(false)
@@ -105,6 +121,11 @@ function CommitBox() {
           if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && canCommit) onCommit()
         }}
       />
+      {featureSuffix && (
+        <div className="commit-suffix-hint" title="Automatically appended to your commit message">
+          Appends <code>{featureSuffix}</code>
+        </div>
+      )}
       <div className="commit-actions">
         <div className="commit-opts">
           <label className="amend">
@@ -142,6 +163,8 @@ export function WorkingCopy() {
   const discard = useStore((s) => s.discardFiles)
   const stageAll = useStore((s) => s.stageAll)
   const unstageAll = useStore((s) => s.unstageAll)
+  const active = useStore((s) => s.activeRepoPath)
+  const { size: leftWidth, onResizeStart } = useResizable('wcLeftWidth', 460, 280, 1000)
 
   const unstaged = status?.unstaged ?? []
   const staged = status?.staged ?? []
@@ -153,6 +176,43 @@ export function WorkingCopy() {
     paths: string[]
     anchor: string
   } | null>(null)
+
+  // Space stages the selected unstaged file(s) (or unstages the selected staged
+  // file). Staging a single file auto-advances to the next one in the store.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== ' ' && e.code !== 'Space') return
+      const tag = (document.activeElement?.tagName || '').toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') return
+      // We own Space in the working view — stop it scrolling the file list.
+      e.preventDefault()
+      // Ignore auto-repeat and overlapping runs so concurrent `git add`
+      // invocations can't collide on the index lock.
+      if (e.repeat || useStore.getState().busy) return
+      if (selection && selection.side === 'unstaged') {
+        const t = selection.paths.filter((p) => unstagedPaths.includes(p))
+        if (t.length) {
+          stage(t)
+          setSelection(null)
+        }
+        return
+      }
+      if (selection && selection.side === 'staged') {
+        const t = selection.paths.filter((p) => stagedPaths.includes(p))
+        if (t.length) {
+          unstage(t)
+          setSelection(null)
+        }
+        return
+      }
+      if (sel?.kind === 'working') {
+        if (sel.staged) unstage([sel.path])
+        else stage([sel.path])
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selection, sel, stage, unstage, unstagedPaths, stagedPaths])
 
   const isMulti = (side: Side, path: string): boolean =>
     !!selection && selection.side === side && selection.paths.includes(path)
@@ -234,7 +294,7 @@ export function WorkingCopy() {
 
   return (
     <div className="working">
-      <div className="wc-left">
+      <div className="wc-left" style={{ width: leftWidth, flexShrink: 0 }}>
         <div className="wc-pane">
           <div className="wc-pane-head">
             <span>Staged ({staged.length})</span>
@@ -304,9 +364,16 @@ export function WorkingCopy() {
           </div>
         </div>
 
-        <CommitBox />
+        <CommitBox key={active ?? 'none'} />
       </div>
 
+      <div
+        className="resizer"
+        onMouseDown={onResizeStart}
+        role="separator"
+        aria-orientation="vertical"
+        title="Drag to resize"
+      />
       <DiffViewer />
     </div>
   )

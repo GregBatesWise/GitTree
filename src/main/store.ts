@@ -90,6 +90,17 @@ export async function renameGroup(id: string, name: string): Promise<void> {
   }
 }
 
+export async function setGroupFeatureId(id: string, featureId: string): Promise<void> {
+  const list = await readGroups()
+  const g = list.find((x) => x.id === id)
+  if (g) {
+    const trimmed = featureId.trim()
+    if (trimmed) g.featureId = trimmed
+    else delete g.featureId
+    await writeGroups(list)
+  }
+}
+
 export async function deleteGroup(id: string): Promise<void> {
   const list = (await readGroups()).filter((g) => g.id !== id)
   await writeGroups(list)

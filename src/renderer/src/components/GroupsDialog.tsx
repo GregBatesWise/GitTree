@@ -6,18 +6,26 @@ import type { RepoGroup } from '@shared/types'
 function GroupRow({
   group,
   onRename,
-  onDelete
+  onDelete,
+  onSetFeatureId
 }: {
   group: RepoGroup
   onRename: (id: string, name: string) => void
   onDelete: (id: string) => void
+  onSetFeatureId: (id: string, featureId: string) => void
 }) {
   const [name, setName] = useState(group.name)
+  const [featureId, setFeatureId] = useState(group.featureId ?? '')
 
   const commit = (): void => {
     const trimmed = name.trim()
     if (trimmed && trimmed !== group.name) onRename(group.id, trimmed)
     else setName(group.name)
+  }
+
+  const commitFeatureId = (): void => {
+    const trimmed = featureId.trim()
+    if (trimmed !== (group.featureId ?? '')) onSetFeatureId(group.id, trimmed)
   }
 
   return (
@@ -28,6 +36,18 @@ function GroupRow({
         value={name}
         onChange={(e) => setName(e.target.value)}
         onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        }}
+      />
+      <input
+        className="group-feature"
+        type="text"
+        value={featureId}
+        placeholder="Feature id"
+        title="Appended to every commit made in this group, e.g. 190190 → #190190"
+        onChange={(e) => setFeatureId(e.target.value)}
+        onBlur={commitFeatureId}
         onKeyDown={(e) => {
           if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
         }}
@@ -55,6 +75,7 @@ export function GroupsDialog({ onClose }: { onClose: () => void }) {
   const renameGroup = useStore((s) => s.renameGroup)
   const deleteGroup = useStore((s) => s.deleteGroup)
   const assignGroup = useStore((s) => s.assignGroup)
+  const setGroupFeatureId = useStore((s) => s.setGroupFeatureId)
   const [newName, setNewName] = useState('')
 
   const groupOf = (repoId: string): string =>
@@ -97,7 +118,13 @@ export function GroupsDialog({ onClose }: { onClose: () => void }) {
         {groups.length > 0 && (
           <div className="group-list">
             {groups.map((g) => (
-              <GroupRow key={g.id} group={g} onRename={renameGroup} onDelete={deleteGroup} />
+              <GroupRow
+                key={g.id}
+                group={g}
+                onRename={renameGroup}
+                onDelete={deleteGroup}
+                onSetFeatureId={setGroupFeatureId}
+              />
             ))}
           </div>
         )}

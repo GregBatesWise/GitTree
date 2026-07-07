@@ -11,6 +11,7 @@ import type {
   RepoBookmark,
   RepoGroup,
   ResetMode,
+  StashDetail,
   StashInfo,
   StatusResult,
   SubmoduleInfo,
@@ -22,7 +23,7 @@ const api = window.api
 export type MainView = 'working' | 'history'
 
 export interface FileSelection {
-  kind: 'working' | 'commit' | 'compare'
+  kind: 'working' | 'commit' | 'compare' | 'stash'
   path: string
   staged: boolean
   untracked: boolean
@@ -43,12 +44,15 @@ interface AppState {
   submodules: SubmoduleInfo[]
 
   historyBranch: string
+  historyBranchAuto: boolean
   historyQuery: string
 
   selectedCommit: string | null
   commitDetail: CommitDetail | null
   compareCommit: string | null
   compareDetail: CompareDetail | null
+  selectedStash: StashInfo | null
+  stashDetail: StashDetail | null
   selectedFile: FileSelection | null
   diff: FileDiff | null
   diffLoading: boolean
@@ -67,7 +71,9 @@ interface AppState {
   renameGroup: (id: string, name: string) => Promise<void>
   deleteGroup: (id: string) => Promise<void>
   assignGroup: (repoId: string, groupId: string | null) => Promise<void>
+  setGroupFeatureId: (id: string, featureId: string) => Promise<void>
   refreshAll: () => Promise<void>
+  refreshStatus: () => Promise<void>
   setView: (view: MainView) => void
   dismissError: () => void
   dismissToast: () => void
@@ -77,6 +83,9 @@ interface AppState {
   toggleCompareCommit: (hash: string) => Promise<void>
   selectCompareFile: (path: string) => Promise<void>
   selectWorkingFile: (file: FileChange) => Promise<void>
+  selectStash: (stash: StashInfo) => Promise<void>
+  selectStashFile: (path: string) => Promise<void>
+  clearStash: () => void
 
   stageFiles: (paths: string[]) => Promise<void>
   unstageFiles: (paths: string[]) => Promise<void>
@@ -163,11 +172,14 @@ export const useStore = create<AppState>((set, get) => {
     tags: [],
     submodules: [],
     historyBranch: '',
+    historyBranchAuto: true,
     historyQuery: '',
     selectedCommit: null,
     commitDetail: null,
     compareCommit: null,
     compareDetail: null,
+    selectedStash: null,
+    stashDetail: null,
     selectedFile: null,
     diff: null,
     diffLoading: false,
@@ -194,6 +206,8 @@ export const useStore = create<AppState>((set, get) => {
         commitDetail: null,
         compareCommit: null,
         compareDetail: null,
+        selectedStash: null,
+        stashDetail: null,
         selectedFile: null,
         diff: null,
         status: null,
@@ -204,6 +218,7 @@ export const useStore = create<AppState>((set, get) => {
         tags: [],
         submodules: [],
         historyBranch: '',
+        historyBranchAuto: true,
         historyQuery: ''
       })
       const repo = get().repos.find((r) => r.path === path)
@@ -247,11 +262,14 @@ export const useStore = create<AppState>((set, get) => {
             tags: [],
             submodules: [],
             historyBranch: '',
+            historyBranchAuto: true,
             historyQuery: '',
             selectedCommit: null,
             commitDetail: null,
             compareCommit: null,
             compareDetail: null,
+            selectedStash: null,
+            stashDetail: null,
             selectedFile: null,
             diff: null
           })
@@ -283,13 +301,24 @@ export const useStore = create<AppState>((set, get) => {
       await get().loadGroups()
     },
 
+    setGroupFeatureId: async (id, featureId) => {
+      await api.setGroupFeatureId(id, featureId)
+      await get().loadGroups()
+    },
+
     refreshAll: async () => {
       const p = get().activeRepoPath
       if (!p) return
       set({ loading: true })
-      const [st, lg, br, sh, rm, tg, sm] = await Promise.all([
-        api.status(p),
-        api.log(p, 500, get().historyBranch || undefined),
+      // Load status first so the history filter can default to the current branch.
+      const st = await api.status(p)
+      const branch = st.ok ? (st.data as StatusResult).branch : null
+      if (get().historyBranchAuto && branch && get().historyBranch !== branch) {
+        set({ historyBranch: branch })
+      }
+      const ref = get().historyBranch || undefined
+      const [lg, br, sh, rm, tg, sm] = await Promise.all([
+        api.log(p, 500, ref),
         api.branches(p),
         api.stashes(p),
         api.remotes(p),
@@ -323,11 +352,40 @@ export const useStore = create<AppState>((set, get) => {
       }
     },
 
+    // Lightweight refresh for staging operations: only the working-tree status
+    // changes, so reloading commits/branches/stashes/tags/submodules (a much
+    // heavier set of git calls) is unnecessary and makes staging feel sluggish.
+    refreshStatus: async () => {
+      const p = get().activeRepoPath
+      if (!p) return
+      const st = await api.status(p)
+      if (!st.ok) {
+        set({ error: st.error || 'Failed to load status' })
+        return
+      }
+      set({ status: st.data as StatusResult })
+
+      // Re-load an open working-copy diff so it reflects the new status.
+      const sel = get().selectedFile
+      if (sel && sel.kind === 'working') {
+        const all = [...(get().status?.staged ?? []), ...(get().status?.unstaged ?? [])]
+        const match = all.find((f) => f.path === sel.path && f.staged === sel.staged)
+        if (match) {
+          const d = await api.diffWorking(p, sel.path, sel.staged, sel.untracked)
+          set({ diff: d.ok ? (d.data as FileDiff) : null })
+        } else {
+          set({ selectedFile: null, diff: null })
+        }
+      }
+    },
+
     setView: (view) =>
       set({
         view,
         compareCommit: null,
         compareDetail: null,
+        selectedStash: null,
+        stashDetail: null,
         selectedFile: null,
         diff: null
       }),
@@ -427,12 +485,62 @@ export const useStore = create<AppState>((set, get) => {
       if (!res.ok) set({ error: res.error || 'Failed to load diff' })
     },
 
+    selectStash: async (stash) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      set({
+        selectedStash: stash,
+        stashDetail: null,
+        selectedCommit: null,
+        commitDetail: null,
+        compareCommit: null,
+        compareDetail: null,
+        selectedFile: null,
+        diff: null
+      })
+      const res = await api.stashFiles(p, stash.ref)
+      if (res.ok) {
+        const detail = res.data as StashDetail
+        set({ stashDetail: detail })
+        if (detail.files.length) await get().selectStashFile(detail.files[0].path)
+      } else {
+        set({ error: res.error || 'Failed to load stash' })
+      }
+    },
+
+    selectStashFile: async (path) => {
+      const p = get().activeRepoPath
+      const sd = get().stashDetail
+      if (!p || !sd) return
+      set({
+        selectedFile: { kind: 'stash', path, staged: false, untracked: false },
+        diffLoading: true,
+        diff: null
+      })
+      const res = await api.stashFileDiff(p, sd.ref, path)
+      set({ diff: res.ok ? (res.data as FileDiff) : null, diffLoading: false })
+      if (!res.ok) set({ error: res.error || 'Failed to load diff' })
+    },
+
+    clearStash: () =>
+      set({ selectedStash: null, stashDetail: null, selectedFile: null, diff: null }),
+
     stageFiles: async (paths) => {
       const p = get().activeRepoPath
       if (!p) return
+      // Remember where a single staged file sat so we can select its successor.
+      const before = get().status?.unstaged ?? []
+      const idx = paths.length === 1 ? before.findIndex((f) => f.path === paths[0]) : -1
       if (await runAction('Staging', () => api.stage(p, paths))) {
-        set({ selectedFile: null, diff: null })
-        await get().refreshAll()
+        await get().refreshStatus()
+        if (idx >= 0) {
+          const after = get().status?.unstaged ?? []
+          const next = after.length ? after[Math.min(idx, after.length - 1)] : null
+          if (next) await get().selectWorkingFile(next)
+          else set({ selectedFile: null, diff: null })
+        } else {
+          set({ selectedFile: null, diff: null })
+        }
       }
     },
 
@@ -441,7 +549,7 @@ export const useStore = create<AppState>((set, get) => {
       if (!p) return
       if (await runAction('Unstaging', () => api.unstage(p, paths))) {
         set({ selectedFile: null, diff: null })
-        await get().refreshAll()
+        await get().refreshStatus()
       }
     },
 
@@ -450,7 +558,7 @@ export const useStore = create<AppState>((set, get) => {
       if (!p) return
       if (await runAction('Staging all', () => api.stageAll(p))) {
         set({ selectedFile: null, diff: null })
-        await get().refreshAll()
+        await get().refreshStatus()
       }
     },
 
@@ -459,7 +567,7 @@ export const useStore = create<AppState>((set, get) => {
       if (!p) return
       if (await runAction('Unstaging all', () => api.unstageAll(p))) {
         set({ selectedFile: null, diff: null })
-        await get().refreshAll()
+        await get().refreshStatus()
       }
     },
 
@@ -468,7 +576,7 @@ export const useStore = create<AppState>((set, get) => {
       if (!p) return
       if (await runAction('Discarding', () => api.discard(p, paths))) {
         set({ selectedFile: null, diff: null })
-        await get().refreshAll()
+        await get().refreshStatus()
       }
     },
 
@@ -476,7 +584,7 @@ export const useStore = create<AppState>((set, get) => {
       const p = get().activeRepoPath
       if (!p) return
       if (await runAction('Staging hunk', () => api.applyPatch(p, patch, { cached: true })))
-        await get().refreshAll()
+        await get().refreshStatus()
     },
 
     unstageHunk: async (patch) => {
@@ -487,14 +595,14 @@ export const useStore = create<AppState>((set, get) => {
           api.applyPatch(p, patch, { cached: true, reverse: true })
         )
       )
-        await get().refreshAll()
+        await get().refreshStatus()
     },
 
     discardHunk: async (patch) => {
       const p = get().activeRepoPath
       if (!p) return
       if (await runAction('Discarding hunk', () => api.applyPatch(p, patch, { reverse: true })))
-        await get().refreshAll()
+        await get().refreshStatus()
     },
 
     commit: async (message, amend, push) => {
@@ -597,14 +705,19 @@ export const useStore = create<AppState>((set, get) => {
     stashApply: async (ref, pop) => {
       const p = get().activeRepoPath
       if (!p) return
-      if (await runAction('Applying stash', () => api.stashApply(p, ref, pop)))
+      if (await runAction('Applying stash', () => api.stashApply(p, ref, pop))) {
+        if (pop || get().selectedStash?.ref === ref) get().clearStash()
         await get().refreshAll()
+      }
     },
 
     stashDrop: async (ref) => {
       const p = get().activeRepoPath
       if (!p) return
-      if (await runAction('Dropping stash', () => api.stashDrop(p, ref))) await get().refreshAll()
+      if (await runAction('Dropping stash', () => api.stashDrop(p, ref))) {
+        if (get().selectedStash?.ref === ref) get().clearStash()
+        await get().refreshAll()
+      }
     },
 
     addRemote: async (name, url) => {
@@ -680,7 +793,8 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     setHistoryBranch: async (ref) => {
-      set({ historyBranch: ref })
+      // An explicit choice stops the filter from auto-tracking the current branch.
+      set({ historyBranch: ref, historyBranchAuto: false })
       const p = get().activeRepoPath
       if (!p) return
       set({ loading: true })

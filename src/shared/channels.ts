@@ -9,6 +9,7 @@ export const CH = {
   groupRename: 'groups:rename',
   groupDelete: 'groups:delete',
   groupAssign: 'groups:assign',
+  groupSetFeatureId: 'groups:setFeatureId',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   openFolder: 'dialog:openFolder',
@@ -27,6 +28,8 @@ export const CH = {
   commitFileDiff: 'git:commitFileDiff',
   compareFiles: 'git:compareFiles',
   compareFileDiff: 'git:compareFileDiff',
+  stashFiles: 'git:stashFiles',
+  stashFileDiff: 'git:stashFileDiff',
 
   stage: 'git:stage',
   unstage: 'git:unstage',

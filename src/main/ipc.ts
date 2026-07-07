@@ -103,6 +103,9 @@ export function registerIpc(): void {
   ipcMain.handle(CH.groupAssign, (_e, repoId: string, groupId: string | null) =>
     store.assignRepoToGroup(repoId, groupId)
   )
+  ipcMain.handle(CH.groupSetFeatureId, (_e, id: string, featureId: string) =>
+    store.setGroupFeatureId(id, featureId)
+  )
 
   ipcMain.handle(CH.settingsGet, () => store.getSettings())
   ipcMain.handle(CH.settingsSet, (_e, patch: Partial<AppSettings>) => store.setSettings(patch))
@@ -151,6 +154,13 @@ export function registerIpc(): void {
     CH.compareFileDiff,
     (_e, p: string, base: string, target: string, file: string) =>
       wrap(() => repo.compareFileDiff(p, base, target, file))
+  )
+
+  ipcMain.handle(CH.stashFiles, (_e, p: string, ref: string) =>
+    wrap(() => repo.stashFiles(p, ref))
+  )
+  ipcMain.handle(CH.stashFileDiff, (_e, p: string, ref: string, file: string) =>
+    wrap(() => repo.stashFileDiff(p, ref, file))
   )
 
   ipcMain.handle(CH.stage, (_e, p: string, files: string[]) => wrap(() => repo.stage(p, files)))

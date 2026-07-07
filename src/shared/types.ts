@@ -10,6 +10,8 @@ export interface RepoGroup {
   id: string
   name: string
   repoIds: string[]
+  /** Optional issue/feature id appended to every commit made in this group, e.g. "190190" -> "#190190". */
+  featureId?: string
 }
 
 export interface AppSettings {
@@ -126,6 +128,11 @@ export interface CommitDetail {
 export interface CompareDetail {
   base: string // older commit
   target: string // newer commit
+  files: FileChange[]
+}
+
+export interface StashDetail {
+  ref: string // e.g. stash@{0}
   files: FileChange[]
 }
 

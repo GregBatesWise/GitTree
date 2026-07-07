@@ -15,6 +15,7 @@ import type {
   PushOptions,
   RemoteInfo,
   ResetMode,
+  StashDetail,
   StashInfo,
   StatusResult,
   SubmoduleInfo,
@@ -33,7 +34,14 @@ export async function repoName(path: string): Promise<string> {
 }
 
 export async function status(path: string): Promise<StatusResult> {
-  const res = await gitOk(path, ['status', '--porcelain=v2', '--branch'])
+  // --untracked-files=all lists new files individually instead of collapsing a
+  // brand-new directory to a single entry, so added files always show up.
+  const res = await gitOk(path, [
+    'status',
+    '--porcelain=v2',
+    '--branch',
+    '--untracked-files=all'
+  ])
   return P.parseStatus(res.stdout)
 }
 
@@ -157,6 +165,27 @@ export async function compareFileDiff(
 ): Promise<FileDiff> {
   const res = await runGit(path, ['diff', '-M', base, target, '--', file])
   return P.parseDiff(file, res.stdout)
+}
+
+export async function stashFiles(path: string, ref: string): Promise<StashDetail> {
+  // -u includes untracked files captured by `git stash push -u`.
+  const res = await runGit(path, ['stash', 'show', '-u', '--name-status', '-M', ref])
+  if (res.code !== 0) return { ref, files: [] }
+  return { ref, files: P.parseNameStatus(res.stdout) }
+}
+
+export async function stashFileDiff(
+  path: string,
+  ref: string,
+  file: string
+): Promise<FileDiff> {
+  // Tracked changes live between the stash base (^1) and the stash commit.
+  const tracked = await runGit(path, ['diff', `${ref}^1`, ref, '--', file])
+  if (tracked.stdout.trim()) return P.parseDiff(file, tracked.stdout)
+  // Untracked files (stashed with -u) live in the third parent (^3).
+  const untracked = await runGit(path, ['diff', `${ref}^1`, `${ref}^3`, '--', file])
+  if (untracked.stdout.trim()) return P.parseDiff(file, untracked.stdout)
+  return { path: file, binary: false, hunks: [] }
 }
 
 export async function stage(path: string, files: string[]): Promise<void> {

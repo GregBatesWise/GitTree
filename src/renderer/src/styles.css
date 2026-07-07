@@ -191,6 +191,23 @@ body.resizing {
   user-select: none;
 }
 
+.resizer-v {
+  flex: 0 0 5px;
+  cursor: row-resize;
+  background: transparent;
+  transition: background 0.12s;
+}
+
+.resizer-v:hover,
+body.resizing-v .resizer-v {
+  background: var(--accent-dim);
+}
+
+body.resizing-v {
+  cursor: row-resize;
+  user-select: none;
+}
+
 .side-section {
   margin-top: 6px;
 }
@@ -662,6 +679,27 @@ body.resizing {
   flex-wrap: wrap;
 }
 
+.commit-suffix-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.commit-suffix-hint code {
+  font-family: var(--mono);
+  color: var(--accent);
+  background: var(--panel-3);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.stash-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+}
+
 /* ---------- Diff viewer ---------- */
 .diff {
   flex: 1;
@@ -846,6 +884,12 @@ body.resizing {
 
 .group-item .group-name {
   flex: 1;
+}
+
+.group-item .group-feature {
+  flex: 0 0 116px;
+  width: 116px;
+  font-family: var(--mono);
 }
 
 .group-item .group-count {

@@ -134,6 +134,8 @@ export function Sidebar({ width }: { width?: number }) {
   const deleteBranch = useStore((s) => s.deleteBranch)
   const stashApply = useStore((s) => s.stashApply)
   const stashDrop = useStore((s) => s.stashDrop)
+  const selectStash = useStore((s) => s.selectStash)
+  const selectedStash = useStore((s) => s.selectedStash)
   const deleteTag = useStore((s) => s.deleteTag)
   const pushTag = useStore((s) => s.pushTag)
   const updateSubmodules = useStore((s) => s.updateSubmodules)
@@ -374,7 +376,13 @@ export function Sidebar({ width }: { width?: number }) {
         {!collapsed.stashes && (
           <>
             {stashes.map((s) => (
-              <div key={s.ref} className="side-item" title={s.message}>
+              <div
+                key={s.ref}
+                className={'side-item' + (selectedStash?.ref === s.ref ? ' active' : '')}
+                title={s.message + '\nClick to preview — double-click to apply (keep stash)'}
+                onClick={() => selectStash(s)}
+                onDoubleClick={() => stashApply(s.ref, false)}
+              >
                 <span className="ico">⚑</span>
                 <span className="label">{s.message}</span>
                 <span className="hover-actions" onClick={(e) => e.stopPropagation()}>

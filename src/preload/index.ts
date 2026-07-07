@@ -16,6 +16,7 @@ import type {
   RepoBookmark,
   RepoGroup,
   ResetMode,
+  StashDetail,
   StashInfo,
   StatusResult,
   SubmoduleInfo,
@@ -33,6 +34,8 @@ const api = {
   deleteGroup: (id: string): Promise<void> => ipcRenderer.invoke(CH.groupDelete, id),
   assignGroup: (repoId: string, groupId: string | null): Promise<void> =>
     ipcRenderer.invoke(CH.groupAssign, repoId, groupId),
+  setGroupFeatureId: (id: string, featureId: string): Promise<void> =>
+    ipcRenderer.invoke(CH.groupSetFeatureId, id, featureId),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke(CH.settingsGet),
   setSettings: (patch: Partial<AppSettings>): Promise<AppSettings> =>
     ipcRenderer.invoke(CH.settingsSet, patch),
@@ -69,6 +72,11 @@ const api = {
     target: string,
     file: string
   ): Promise<GitResult<FileDiff>> => ipcRenderer.invoke(CH.compareFileDiff, p, base, target, file),
+
+  stashFiles: (p: string, ref: string): Promise<GitResult<StashDetail>> =>
+    ipcRenderer.invoke(CH.stashFiles, p, ref),
+  stashFileDiff: (p: string, ref: string, file: string): Promise<GitResult<FileDiff>> =>
+    ipcRenderer.invoke(CH.stashFileDiff, p, ref, file),
 
   stage: (p: string, files: string[]): Promise<GitResult> => ipcRenderer.invoke(CH.stage, p, files),
   unstage: (p: string, files: string[]): Promise<GitResult> =>

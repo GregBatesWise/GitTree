@@ -4,6 +4,7 @@ import { Toolbar } from './components/Toolbar'
 import { Sidebar } from './components/Sidebar'
 import { WorkingCopy } from './components/WorkingCopy'
 import { HistoryView } from './components/HistoryView'
+import { StashView } from './components/StashView'
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
@@ -21,6 +22,7 @@ export default function App() {
   const init = useStore((s) => s.init)
   const view = useStore((s) => s.view)
   const active = useStore((s) => s.activeRepoPath)
+  const selectedStash = useStore((s) => s.selectedStash)
   const status = useStore((s) => s.status)
   const error = useStore((s) => s.error)
   const dismissError = useStore((s) => s.dismissError)
@@ -95,6 +97,8 @@ export default function App() {
         <div className="content">
           {!active ? (
             <EmptyState onAdd={addRepo} />
+          ) : selectedStash ? (
+            <StashView />
           ) : view === 'working' ? (
             <WorkingCopy />
           ) : (

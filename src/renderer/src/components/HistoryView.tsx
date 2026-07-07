@@ -5,6 +5,7 @@ import { fullDate, relativeTime } from '../lib/format'
 import { DiffViewer } from './DiffViewer'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { Modal } from './Dialog'
+import { useResizable } from '../lib/useResizable'
 import type { CommitDetail, CompareDetail, FileChange, ResetMode } from '@shared/types'
 
 const ROW_H = 32
@@ -246,6 +247,19 @@ export function HistoryView() {
   const [menu, setMenu] = useState<{ x: number; y: number; hash: string } | null>(null)
   const [branchAt, setBranchAt] = useState<string | null>(null)
   const [resetAt, setResetAt] = useState<string | null>(null)
+  const { size: detailWidth, onResizeStart: onDetailResize } = useResizable(
+    'histDetailWidth',
+    380,
+    240,
+    1000
+  )
+  const { size: listHeight, onResizeStart: onListResize } = useResizable(
+    'histListHeight',
+    320,
+    140,
+    900,
+    'y'
+  )
 
   const locals = branches.filter((b) => !b.isRemote)
   const remoteBranches = branches.filter((b) => b.isRemote)
@@ -360,7 +374,7 @@ export function HistoryView() {
           )}
         </select>
       </div>
-      <div className="commit-scroll">
+      <div className="commit-scroll" style={{ flex: 'none', height: listHeight }}>
         {filtered.length ? (
           <table className="commit-table">
             <tbody>
@@ -406,8 +420,15 @@ export function HistoryView() {
           </div>
         )}
       </div>
+      <div
+        className="resizer-v"
+        onMouseDown={onListResize}
+        role="separator"
+        aria-orientation="horizontal"
+        title="Drag to resize"
+      />
       <div className="detail-split">
-        <div className="detail-left">
+        <div className="detail-left" style={{ width: detailWidth, flexShrink: 0 }}>
           {compareDetail ? (
             <CompareMeta detail={compareDetail} />
           ) : detail ? (
@@ -418,6 +439,13 @@ export function HistoryView() {
             </div>
           )}
         </div>
+        <div
+          className="resizer"
+          onMouseDown={onDetailResize}
+          role="separator"
+          aria-orientation="vertical"
+          title="Drag to resize"
+        />
         <DiffViewer />
       </div>
       {menu && (
