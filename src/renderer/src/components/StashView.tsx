@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { useStore } from '../store'
 import { DiffViewer } from './DiffViewer'
+import { DropStashDialog } from './DropStashDialog'
 import { useResizable } from '../lib/useResizable'
 import type { FileChange } from '@shared/types'
 
@@ -30,9 +32,9 @@ export function StashView() {
   const selectedFile = useStore((s) => s.selectedFile)
   const selectStashFile = useStore((s) => s.selectStashFile)
   const stashApply = useStore((s) => s.stashApply)
-  const stashDrop = useStore((s) => s.stashDrop)
   const clearStash = useStore((s) => s.clearStash)
   const { size: filesWidth, onResizeStart } = useResizable('stashFilesWidth', 380, 240, 900)
+  const [dropping, setDropping] = useState(false)
 
   if (!stash) return null
 
@@ -41,8 +43,12 @@ export function StashView() {
       <div className="wc-left" style={{ width: filesWidth, flexShrink: 0 }}>
         <div className="wc-pane">
           <div className="wc-pane-head">
-            <span className="stash-title" title={stash.message}>
-              ⚑ {stash.message}
+            {/* Grouped so .wc-pane-head's space-between still sees two children. */}
+            <span className="stash-head-label">
+              <span className="stash-title" title={stash.message}>
+                ⚑ {stash.name}
+              </span>
+              {stash.branch && <span className="stash-branch">{stash.branch}</span>}
             </span>
             <div className="group-btns">
               <button
@@ -62,9 +68,7 @@ export function StashView() {
               <button
                 className="mini-btn danger"
                 title="Drop this stash"
-                onClick={() => {
-                  if (confirm(`Drop ${stash.ref}?`)) stashDrop(stash.ref)
-                }}
+                onClick={() => setDropping(true)}
               >
                 Drop
               </button>
@@ -103,6 +107,7 @@ export function StashView() {
         title="Drag to resize"
       />
       <DiffViewer />
+      {dropping && <DropStashDialog stash={stash} onClose={() => setDropping(false)} />}
     </div>
   )
 }

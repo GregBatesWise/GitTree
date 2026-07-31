@@ -60,6 +60,18 @@ function openTerminal(cwd: string): Promise<void> {
   })
 }
 
+/** Spawns a detached child, resolving once it is running rather than when it exits. */
+function spawnDetached(cmd: string, args: string[], cwd: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { cwd, detached: true, stdio: 'ignore' })
+    child.once('error', (e) => reject(e))
+    child.once('spawn', () => {
+      child.unref()
+      resolve()
+    })
+  })
+}
+
 /** Launches the user's configured Git difftool for a file at a commit vs. its parent. */
 async function externalDiff(cwd: string, hash: string, file: string): Promise<void> {
   const tool = await runGit(cwd, ['config', '--get', 'diff.tool'])
@@ -71,14 +83,52 @@ async function externalDiff(cwd: string, hash: string, file: string): Promise<vo
   const args = ['difftool', '-y']
   if (hasGui) args.push('-g')
   args.push(`${hash}^!`, '--', file)
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn('git', args, { cwd, detached: true, stdio: 'ignore' })
-    child.once('error', (e) => reject(e))
-    child.once('spawn', () => {
-      child.unref()
-      resolve()
-    })
-  })
+  await spawnDetached('git', args, cwd)
+}
+
+/**
+ * Opens a conflicted file in VS Code's three-way merge editor.
+ *
+ * The tool is configured with `-c` rather than expecting `mergetool.vscode.*`
+ * in the user's Git config, so this works on a fresh machine. VS Code ships a
+ * POSIX `code` script alongside `code.cmd`, which is what git's sh-based
+ * mergetool invocation needs. `trustExitCode` lets git mark the file resolved
+ * when the editor is closed with a zero exit code.
+ *
+ * The child is not awaited — `code --wait` only returns once the user closes
+ * the merge editor, which can be minutes. The resolved file shows up on the
+ * next refresh (Ctrl+R or the toolbar button).
+ */
+async function openMergeTool(cwd: string, file: string): Promise<void> {
+  // git mergetool says "no files need merging" and exits 0 for anything else,
+  // which would look like a silent no-op. Fail with something readable instead.
+  // quotePath=false keeps non-ASCII paths comparable to what the renderer sent.
+  const conflicted = await runGit(cwd, [
+    '-c',
+    'core.quotePath=false',
+    'diff',
+    '--name-only',
+    '--diff-filter=U'
+  ])
+  const files = conflicted.stdout.split('\n').map((l) => l.trim())
+  if (!files.includes(file)) {
+    throw new Error(`"${file}" has no merge conflicts to resolve.`)
+  }
+  await spawnDetached(
+    'git',
+    [
+      '-c',
+      'mergetool.vscode.cmd=code --wait --merge "$REMOTE" "$LOCAL" "$BASE" "$MERGED"',
+      '-c',
+      'mergetool.vscode.trustExitCode=true',
+      'mergetool',
+      '--no-prompt',
+      '--tool=vscode',
+      '--',
+      file
+    ],
+    cwd
+  )
 }
 
 export function registerIpc(): void {
@@ -95,6 +145,7 @@ export function registerIpc(): void {
   )
 
   ipcMain.handle(CH.repoRemove, (_e, id: string) => store.removeRepo(id))
+  ipcMain.handle(CH.reposReorder, (_e, ids: string[]) => store.reorderRepos(ids))
 
   ipcMain.handle(CH.groupsList, () => store.listGroups())
   ipcMain.handle(CH.groupCreate, (_e, name: string) => store.createGroup(name))
@@ -239,6 +290,7 @@ export function registerIpc(): void {
   ipcMain.handle(CH.externalDiffCommit, (_e, p: string, hash: string, file: string) =>
     wrap(() => externalDiff(p, hash, file))
   )
+  ipcMain.handle(CH.mergeTool, (_e, p: string, file: string) => wrap(() => openMergeTool(p, file)))
   ipcMain.handle(CH.copyText, (_e, text: string) => {
     clipboard.writeText(text)
   })

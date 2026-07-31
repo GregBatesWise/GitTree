@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { useStore } from '../store'
 import { Modal } from './Dialog'
 import { ContextMenu, type MenuItem } from './ContextMenu'
-import type { BranchInfo, SubmoduleInfo } from '@shared/types'
+import { DeleteBranchDialog } from './DeleteBranchDialog'
+import { DropStashDialog } from './DropStashDialog'
+import type { BranchInfo, StashInfo, SubmoduleInfo } from '@shared/types'
 
 function subStateLabel(state: SubmoduleInfo['state']): string {
   switch (state) {
@@ -131,9 +133,7 @@ export function Sidebar({ width }: { width?: number }) {
   const active = useStore((s) => s.activeRepoPath)
   const checkout = useStore((s) => s.checkoutBranch)
   const merge = useStore((s) => s.mergeBranch)
-  const deleteBranch = useStore((s) => s.deleteBranch)
   const stashApply = useStore((s) => s.stashApply)
-  const stashDrop = useStore((s) => s.stashDrop)
   const selectStash = useStore((s) => s.selectStash)
   const selectedStash = useStore((s) => s.selectedStash)
   const deleteTag = useStore((s) => s.deleteTag)
@@ -155,6 +155,8 @@ export function Sidebar({ width }: { width?: number }) {
     branch: BranchInfo
   } | null>(null)
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<BranchInfo | null>(null)
+  const [dropStash, setDropStash] = useState<StashInfo | null>(null)
 
   if (!active) return <div className="sidebar" style={{ width }} />
 
@@ -170,11 +172,9 @@ export function Sidebar({ width }: { width?: number }) {
       items.push({ label: 'Merge into Current Branch', onClick: () => merge(b.name) })
       items.push({ separator: true })
       items.push({
-        label: 'Delete Branch',
+        label: 'Delete Branch…',
         danger: true,
-        onClick: () => {
-          if (confirm(`Delete branch "${b.name}"?`)) deleteBranch(b.name, false)
-        }
+        onClick: () => setDeleteTarget(b)
       })
     }
     return items
@@ -213,7 +213,7 @@ export function Sidebar({ width }: { width?: number }) {
             {locals.map((b) => (
               <div
                 key={b.name}
-                className={'side-item' + (b.current ? ' current' : '')}
+                className={'side-item' + (b.current ? ' current' : '') + (b.gone ? ' gone' : '')}
                 title={b.current ? b.name + ' (current)' : 'Double-click to check out ' + b.name}
                 onDoubleClick={() => {
                   if (!b.current) checkout(b.name)
@@ -231,6 +231,14 @@ export function Sidebar({ width }: { width?: number }) {
                     {b.behind ? `↓${b.behind}` : ''}
                   </span>
                 ) : null}
+                {b.gone && (
+                  <span
+                    className="gone-badge"
+                    title={`Upstream ${b.upstream} no longer exists on the remote — safe to delete locally`}
+                  >
+                    gone
+                  </span>
+                )}
                 {!b.current && (
                   <span className="hover-actions" onClick={(e) => e.stopPropagation()}>
                     <button className="mini-btn" onClick={() => merge(b.name)}>
@@ -239,9 +247,7 @@ export function Sidebar({ width }: { width?: number }) {
                     <button
                       className="mini-btn danger"
                       title="Delete branch"
-                      onClick={() => {
-                        if (confirm(`Delete branch "${b.name}"?`)) deleteBranch(b.name, false)
-                      }}
+                      onClick={() => setDeleteTarget(b)}
                     >
                       ✕
                     </button>
@@ -384,7 +390,8 @@ export function Sidebar({ width }: { width?: number }) {
                 onDoubleClick={() => stashApply(s.ref, false)}
               >
                 <span className="ico">⚑</span>
-                <span className="label">{s.message}</span>
+                <span className="label">{s.name}</span>
+                {s.branch && <span className="stash-branch">{s.branch}</span>}
                 <span className="hover-actions" onClick={(e) => e.stopPropagation()}>
                   <button className="mini-btn" title="Apply and drop" onClick={() => stashApply(s.ref, true)}>
                     Pop
@@ -392,13 +399,7 @@ export function Sidebar({ width }: { width?: number }) {
                   <button className="mini-btn" title="Apply, keep stash" onClick={() => stashApply(s.ref, false)}>
                     Apply
                   </button>
-                  <button
-                    className="mini-btn danger"
-                    title="Drop stash"
-                    onClick={() => {
-                      if (confirm(`Drop ${s.ref}?`)) stashDrop(s.ref)
-                    }}
-                  >
+                  <button className="mini-btn danger" title="Drop stash" onClick={() => setDropStash(s)}>
                     ✕
                   </button>
                 </span>
@@ -421,6 +422,10 @@ export function Sidebar({ width }: { width?: number }) {
       {renameTarget && (
         <RenameBranchDialog name={renameTarget} onClose={() => setRenameTarget(null)} />
       )}
+      {deleteTarget && (
+        <DeleteBranchDialog branch={deleteTarget} onClose={() => setDeleteTarget(null)} />
+      )}
+      {dropStash && <DropStashDialog stash={dropStash} onClose={() => setDropStash(null)} />}
     </div>
   )
 }

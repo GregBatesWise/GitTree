@@ -67,12 +67,21 @@ export interface BranchInfo {
   ahead: number
   behind: number
   isRemote: boolean
+  /** Upstream is configured but no longer exists on the remote (git's `[gone]`)
+   *  — typically a branch whose PR was merged and whose origin ref was deleted,
+   *  so it is safe to delete locally. */
+  gone: boolean
 }
 
 export interface StashInfo {
   index: number
   ref: string // e.g. stash@{0}
+  /** Raw git subject, e.g. 'On main: my label'. Kept for tooltips. */
   message: string
+  /** The part worth showing: the -m label, or the base commit's subject for an
+   *  auto-named stash. Never empty — falls back to `message`. */
+  name: string
+  /** Branch the stash was made on, or '(no branch)' on a detached HEAD. */
   branch: string | null
 }
 

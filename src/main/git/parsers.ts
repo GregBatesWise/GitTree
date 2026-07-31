@@ -167,11 +167,15 @@ export function parseBranches(raw: string): BranchInfo[] {
     if (isRemote && short.endsWith('/HEAD')) continue
     let ahead = 0
     let behind = 0
+    let gone = false
     if (track) {
       const a = /ahead (\d+)/.exec(track)
       if (a) ahead = Number(a[1])
       const b = /behind (\d+)/.exec(track)
       if (b) behind = Number(b[1])
+      // %(upstream:track) reports a deleted upstream as the literal '[gone]',
+      // which matches neither count above.
+      gone = /\[gone\]/.test(track)
     }
     out.push({
       name: short,
@@ -179,7 +183,8 @@ export function parseBranches(raw: string): BranchInfo[] {
       upstream: upstream || null,
       ahead,
       behind,
-      isRemote
+      isRemote,
+      gone
     })
   }
   return out
@@ -190,10 +195,22 @@ export function parseStashes(raw: string): StashInfo[] {
   raw.split('\n').forEach((line, i) => {
     if (!line.trim()) return
     const [ref, msg] = line.split('\x1f')
+    const message = msg || ''
     let branch: string | null = null
-    const m = /(?:WIP on|On) ([^:]+):/.exec(msg || '')
-    if (m) branch = m[1]
-    out.push({ index: i, ref: ref || `stash@{${i}}`, message: msg || '', branch })
+    let name = message
+    // git's stash subject is 'WIP on <branch>: <sha> <subject>' when auto-named
+    // and 'On <branch>: <message>' when created with -m. Anchored so a user
+    // message that merely looks like a prefix can't be mistaken for one, and
+    // [^:]+ stops at the first colon because refs cannot contain one — the rest
+    // is kept whole, since both user messages and commit subjects may have colons.
+    const m = /^(WIP on|On) ([^:]+): ?(.*)$/.exec(message)
+    if (m) {
+      branch = m[2]
+      // The auto-named form prefixes the base commit's short sha; that's noise.
+      const rest = m[1] === 'WIP on' ? m[3].replace(/^[0-9a-f]{7,40} /, '') : m[3]
+      name = rest.trim() || message
+    }
+    out.push({ index: i, ref: ref || `stash@{${i}}`, message, name, branch })
   })
   return out
 }

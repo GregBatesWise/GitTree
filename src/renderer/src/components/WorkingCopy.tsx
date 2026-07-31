@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { useStore } from '../store'
+import { activeLineSelection, useStore } from '../store'
 import { DiffViewer } from './DiffViewer'
 import { useResizable } from '../lib/useResizable'
+import { claimsKey, nextRowIndex } from '../lib/keys'
 import type { FileChange } from '@shared/types'
 
 type Side = 'staged' | 'unstaged'
@@ -35,7 +36,8 @@ function FileRow({
   onClick,
   onStage,
   onUnstage,
-  onDiscard
+  onDiscard,
+  onResolve
 }: {
   file: FileChange
   side: Side
@@ -45,6 +47,7 @@ function FileRow({
   onStage: () => void
   onUnstage: () => void
   onDiscard: () => void
+  onResolve: () => void
 }) {
   return (
     <div
@@ -57,6 +60,15 @@ function FileRow({
       <span className="row-actions" onClick={(e) => e.stopPropagation()}>
         {side === 'unstaged' ? (
           <>
+            {file.status === 'conflicted' && (
+              <button
+                className="mini-btn"
+                title="Resolve the conflict in VS Code's merge editor"
+                onClick={onResolve}
+              >
+                Resolve
+              </button>
+            )}
             <button className="mini-btn" onClick={onStage}>
               Stage
             </button>
@@ -75,9 +87,12 @@ function FileRow({
 }
 
 function CommitBox() {
-  const [message, setMessage] = useState('')
   const [amend, setAmend] = useState(false)
   const [pushOnCommit, setPushOnCommit] = useState(false)
+  // The draft lives in the store so it survives this component being unmounted
+  // by a repo switch, a view switch, or a stash preview.
+  const message = useStore((s) => (s.activeRepoPath ? (s.commitDrafts[s.activeRepoPath] ?? '') : ''))
+  const setMessage = useStore((s) => s.setCommitDraft)
   const status = useStore((s) => s.status)
   const remotes = useStore((s) => s.remotes)
   const groups = useStore((s) => s.groups)
@@ -105,10 +120,8 @@ function CommitBox() {
     const finalMessage =
       featureSuffix && !base.includes(featureSuffix) ? `${base} ${featureSuffix}` : base
     const ok = await commit(finalMessage, amend, willPush)
-    if (ok) {
-      setMessage('')
-      setAmend(false)
-    }
+    // The store clears the draft itself on success; only the local flags reset here.
+    if (ok) setAmend(false)
   }
 
   return (
@@ -163,6 +176,7 @@ export function WorkingCopy() {
   const discard = useStore((s) => s.discardFiles)
   const stageAll = useStore((s) => s.stageAll)
   const unstageAll = useStore((s) => s.unstageAll)
+  const resolveInMergeTool = useStore((s) => s.resolveInMergeTool)
   const active = useStore((s) => s.activeRepoPath)
   const { size: leftWidth, onResizeStart } = useResizable('wcLeftWidth', 460, 280, 1000)
 
@@ -182,15 +196,27 @@ export function WorkingCopy() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== ' ' && e.code !== 'Space') return
-      const tag = (document.activeElement?.tagName || '').toLowerCase()
-      if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') return
+      if (claimsKey(e.target) || claimsKey(document.activeElement)) return
+      // An open dialog owns the keyboard; staging behind it would be invisible.
+      if (document.querySelector('.modal')) return
       // We own Space in the working view — stop it scrolling the file list.
       e.preventDefault()
       // Ignore auto-repeat and overlapping runs so concurrent `git add`
       // invocations can't collide on the index lock.
       if (e.repeat || useStore.getState().busy) return
+      // Lines picked in the diff pane win over the file list: Space stages
+      // exactly what is highlighted there rather than the whole file.
+      if (activeLineSelection(useStore.getState())) {
+        useStore.getState().applyLineSelection()
+        return
+      }
+      // Read the lists fresh rather than closing over them: a refresh landing
+      // between renders would otherwise leave the captured paths stale.
+      const st = useStore.getState().status
+      const unstagedNow = st?.unstaged.map((f) => f.path) ?? []
+      const stagedNow = st?.staged.map((f) => f.path) ?? []
       if (selection && selection.side === 'unstaged') {
-        const t = selection.paths.filter((p) => unstagedPaths.includes(p))
+        const t = selection.paths.filter((p) => unstagedNow.includes(p))
         if (t.length) {
           stage(t)
           setSelection(null)
@@ -198,7 +224,7 @@ export function WorkingCopy() {
         return
       }
       if (selection && selection.side === 'staged') {
-        const t = selection.paths.filter((p) => stagedPaths.includes(p))
+        const t = selection.paths.filter((p) => stagedNow.includes(p))
         if (t.length) {
           unstage(t)
           setSelection(null)
@@ -212,7 +238,43 @@ export function WorkingCopy() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selection, sel, stage, unstage, unstagedPaths, stagedPaths])
+  }, [selection, sel, stage, unstage])
+
+  // Up/Down walk the staged and unstaged panes as one continuous sequence, so
+  // Down off the last staged file lands on the first unstaged one.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+      if (claimsKey(e.target) || claimsKey(document.activeElement)) return
+      if (document.querySelector('.modal')) return
+      const st = useStore.getState().status
+      const rows: { side: Side; file: FileChange }[] = [
+        ...(st?.staged ?? []).map((file) => ({ side: 'staged' as Side, file })),
+        ...(st?.unstaged ?? []).map((file) => ({ side: 'unstaged' as Side, file }))
+      ]
+      if (!rows.length) return
+      // Ours now — otherwise the list also scrolls natively, fighting scrollIntoView.
+      e.preventDefault()
+      const down = e.key === 'ArrowDown'
+      const cur = useStore.getState().selectedFile
+      const at =
+        cur?.kind === 'working'
+          ? rows.findIndex((r) => r.file.path === cur.path && r.file.staged === cur.staged)
+          : -1
+      const row = rows[nextRowIndex(rows.length, at, down)]
+      // Collapse any multi-selection down to the row we moved onto, so Space
+      // and shift-click keep operating on what is actually highlighted.
+      setSelection({ side: row.side, paths: [row.file.path], anchor: row.file.path })
+      select(row.file)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [select])
+
+  // Keep the keyboard-selected row visible; a no-op when it already is.
+  useEffect(() => {
+    document.querySelector('.file-row.selected')?.scrollIntoView({ block: 'nearest' })
+  }, [sel])
 
   const isMulti = (side: Side, path: string): boolean =>
     !!selection && selection.side === side && selection.paths.includes(path)
@@ -321,6 +383,7 @@ export function WorkingCopy() {
                 onStage={() => doStage(f.path)}
                 onUnstage={() => doUnstage(f.path)}
                 onDiscard={() => doDiscard(f.path)}
+                onResolve={() => resolveInMergeTool(f.path)}
               />
             ))}
             {!staged.length && <div className="side-empty">No staged changes</div>}
@@ -358,12 +421,16 @@ export function WorkingCopy() {
                 onStage={() => doStage(f.path)}
                 onUnstage={() => doUnstage(f.path)}
                 onDiscard={() => doDiscard(f.path)}
+                onResolve={() => resolveInMergeTool(f.path)}
               />
             ))}
             {!unstaged.length && <div className="side-empty">No unstaged changes</div>}
           </div>
         </div>
 
+        {/* Keyed on the repo so "Amend"/"Push after commit" reset when it changes —
+            carrying an amend flag across repos would be dangerous. The message
+            itself is keyed by repo in the store, so it survives the remount. */}
         <CommitBox key={active ?? 'none'} />
       </div>
 

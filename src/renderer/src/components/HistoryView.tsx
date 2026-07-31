@@ -1,7 +1,7 @@
 import { useMemo, useState, type MouseEvent } from 'react'
 import { useStore } from '../store'
 import { buildGraph, LANE_COLORS, type GraphRow } from '../lib/graph'
-import { fullDate, relativeTime } from '../lib/format'
+import { fullDate, relativeTime, shortDateTime } from '../lib/format'
 import { DiffViewer } from './DiffViewer'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { Modal } from './Dialog'
@@ -406,8 +406,13 @@ export function HistoryView() {
                     </div>
                   </td>
                   <td className="col-author">{c.author}</td>
-                  <td className="col-date" title={fullDate(c.date)}>
-                    {relativeTime(c.date)}
+                  {/* Absolute time, with the relative reading kept in the tooltip:
+                      ordering commits made minutes apart needs the clock time. */}
+                  <td
+                    className="col-date"
+                    title={`${fullDate(c.date)} (${relativeTime(c.date)})`}
+                  >
+                    {shortDateTime(c.date)}
                   </td>
                   <td className="col-hash">{c.shortHash}</td>
                 </tr>

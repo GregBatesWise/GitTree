@@ -16,6 +16,29 @@ export function relativeTime(iso: string): string {
   return `${yr} year${yr === 1 ? '' : 's'} ago`
 }
 
+/**
+ * Compact absolute date and time for the history list, e.g. "31 Jul 2026 14:32".
+ * Today's commits drop the date, since "14:32" is the useful part when several
+ * land in one day — which is exactly when a relative "2 hours ago" stops helping.
+ */
+export function shortDateTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  const now = new Date()
+  const sameDay =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear()
+  if (sameDay) return time
+  const date = d.toLocaleDateString(undefined, {
+    day: '2-digit',
+    month: 'short',
+    year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric'
+  })
+  return `${date} ${time}`
+}
+
 export function fullDate(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso

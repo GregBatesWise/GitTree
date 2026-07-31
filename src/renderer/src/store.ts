@@ -1,9 +1,11 @@
 import { create } from 'zustand'
+import { buildLinePatch } from './lib/patch'
 import type {
   BranchInfo,
   CommitDetail,
   CommitInfo,
   CompareDetail,
+  DiffHunk,
   FileChange,
   FileDiff,
   GitResult,
@@ -29,7 +31,26 @@ export interface FileSelection {
   untracked: boolean
 }
 
-interface AppState {
+/**
+ * Lines picked out of a single hunk of the open working-copy diff, for staging
+ * less than a whole hunk. Kept in the store rather than in DiffViewer so the
+ * working-copy Space shortcut can act on it instead of staging whole files.
+ *
+ * `path`/`staged` identify the diff it was made against: hunk indices shift as
+ * soon as the diff is reloaded, so consumers must check it still matches the
+ * selected file, and every action that changes the index clears it.
+ */
+export interface LineSelection {
+  path: string
+  staged: boolean
+  hunkIndex: number
+  /** Indices into the hunk's `lines`, ascending. */
+  lines: number[]
+  /** Line the last plain click landed on, for shift-click ranges. */
+  anchor: number
+}
+
+export interface AppState {
   repos: RepoBookmark[]
   groups: RepoGroup[]
   activeRepoPath: string | null
@@ -56,6 +77,12 @@ interface AppState {
   selectedFile: FileSelection | null
   diff: FileDiff | null
   diffLoading: boolean
+  lineSelection: LineSelection | null
+
+  /** Unsent commit messages, keyed by repo path. Held here rather than in
+   *  CommitBox's local state so switching repo/view (which unmounts it) does
+   *  not discard what the user has typed. In-memory only — not persisted. */
+  commitDrafts: Record<string, string>
 
   loading: boolean
   busy: string | null
@@ -66,6 +93,7 @@ interface AppState {
   selectRepo: (path: string) => Promise<void>
   addRepoViaDialog: () => Promise<void>
   removeRepo: (id: string) => Promise<void>
+  reorderRepos: (ids: string[]) => Promise<void>
   loadGroups: () => Promise<void>
   createGroup: (name: string) => Promise<void>
   renameGroup: (id: string, name: string) => Promise<void>
@@ -92,10 +120,16 @@ interface AppState {
   stageAll: () => Promise<void>
   unstageAll: () => Promise<void>
   discardFiles: (paths: string[]) => Promise<void>
-  stageHunk: (patch: string) => Promise<void>
-  unstageHunk: (patch: string) => Promise<void>
-  discardHunk: (patch: string) => Promise<void>
+  /** `what` only names the unit in the status bar, e.g. 'hunk' or '3 lines'. */
+  stageHunk: (patch: string, what?: string) => Promise<void>
+  unstageHunk: (patch: string, what?: string) => Promise<void>
+  discardHunk: (patch: string, what?: string) => Promise<void>
+  setLineSelection: (selection: LineSelection | null) => void
+  /** Stages the selected lines, or unstages them if picked on the staged side. */
+  applyLineSelection: () => Promise<void>
+  discardLineSelection: () => Promise<void>
   commit: (message: string, amend: boolean, push: boolean) => Promise<boolean>
+  setCommitDraft: (message: string) => void
 
   push: (setUpstream: boolean) => Promise<void>
   pull: () => Promise<void>
@@ -104,7 +138,7 @@ interface AppState {
   checkoutBranch: (name: string) => Promise<void>
   createBranch: (name: string, checkoutNew: boolean, startPoint?: string) => Promise<boolean>
   mergeBranch: (name: string) => Promise<void>
-  deleteBranch: (name: string, force: boolean) => Promise<void>
+  deleteBranch: (name: string, force: boolean) => Promise<boolean>
   renameBranch: (oldName: string, newName: string) => Promise<boolean>
 
   stashSave: (message: string, includeUntracked: boolean) => Promise<boolean>
@@ -123,6 +157,7 @@ interface AppState {
 
   revealInFileManager: () => Promise<void>
   openInTerminal: () => Promise<void>
+  resolveInMergeTool: (file: string) => Promise<void>
 
   setHistoryBranch: (ref: string) => Promise<void>
   setHistoryQuery: (query: string) => void
@@ -136,7 +171,42 @@ interface AppState {
   copyText: (text: string) => Promise<void>
 }
 
+/**
+ * The line selection, but only when it still describes the diff on screen.
+ * Both the diff pane (highlighting, buttons) and the working-copy Space
+ * shortcut go through this so they can never disagree about what is picked.
+ */
+export function activeLineSelection(
+  s: Pick<AppState, 'lineSelection' | 'selectedFile' | 'diff'>
+): LineSelection | null {
+  const { lineSelection: ls, selectedFile: sel, diff } = s
+  if (!ls || !diff || sel?.kind !== 'working') return null
+  if (sel.path !== ls.path || sel.staged !== ls.staged) return null
+  if (!ls.lines.length || !diff.hunks[ls.hunkIndex]) return null
+  return ls
+}
+
 export const useStore = create<AppState>((set, get) => {
+  /** Resolves the current line selection into everything buildLinePatch needs. */
+  function lineTarget(): {
+    path: string
+    staged: boolean
+    hunk: DiffHunk
+    lines: Set<number>
+    what: string
+  } | null {
+    const ls = activeLineSelection(get())
+    const diff = get().diff
+    if (!ls || !diff) return null
+    return {
+      path: diff.path,
+      staged: ls.staged,
+      hunk: diff.hunks[ls.hunkIndex],
+      lines: new Set(ls.lines),
+      what: `${ls.lines.length} line${ls.lines.length === 1 ? '' : 's'}`
+    }
+  }
+
   async function runAction(
     label: string,
     fn: () => Promise<GitResult<unknown> | void>,
@@ -183,6 +253,8 @@ export const useStore = create<AppState>((set, get) => {
     selectedFile: null,
     diff: null,
     diffLoading: false,
+    lineSelection: null,
+    commitDrafts: {},
     loading: false,
     busy: null,
     error: null,
@@ -247,7 +319,9 @@ export const useStore = create<AppState>((set, get) => {
       const repos = await api.listRepos()
       const removed = get().repos.find((r) => r.id === id)
       const wasActive = removed && removed.path === get().activeRepoPath
-      set({ repos })
+      const drafts = { ...get().commitDrafts }
+      if (removed) delete drafts[removed.path]
+      set({ repos, commitDrafts: drafts })
       await get().loadGroups()
       if (wasActive) {
         if (repos.length) await get().selectRepo(repos[0].path)
@@ -274,6 +348,15 @@ export const useStore = create<AppState>((set, get) => {
             diff: null
           })
       }
+    },
+
+    reorderRepos: async (ids) => {
+      // Reflect the drop immediately so the row does not snap back while the
+      // JSON store is written, then take main's authoritative order.
+      const byId = new Map(get().repos.map((r) => [r.id, r]))
+      const optimistic = ids.map((id) => byId.get(id)).filter((r): r is RepoBookmark => !!r)
+      if (optimistic.length === get().repos.length) set({ repos: optimistic })
+      set({ repos: await api.reorderRepos(ids) })
     },
 
     loadGroups: async () => {
@@ -338,16 +421,17 @@ export const useStore = create<AppState>((set, get) => {
         error: firstErr ? firstErr.error || 'Failed to load repository' : get().error
       })
 
-      // Re-load an open working-copy diff so it reflects the new status.
+      // Re-load an open working-copy diff so it reflects the new status. Any
+      // line selection is dropped: it indexes into the diff we just replaced.
       const sel = get().selectedFile
       if (sel && sel.kind === 'working') {
         const all = [...(get().status?.staged ?? []), ...(get().status?.unstaged ?? [])]
         const match = all.find((f) => f.path === sel.path && f.staged === sel.staged)
         if (match) {
           const d = await api.diffWorking(p, sel.path, sel.staged, sel.untracked)
-          set({ diff: d.ok ? (d.data as FileDiff) : null })
+          set({ diff: d.ok ? (d.data as FileDiff) : null, lineSelection: null })
         } else {
-          set({ selectedFile: null, diff: null })
+          set({ selectedFile: null, diff: null, lineSelection: null })
         }
       }
     },
@@ -365,16 +449,17 @@ export const useStore = create<AppState>((set, get) => {
       }
       set({ status: st.data as StatusResult })
 
-      // Re-load an open working-copy diff so it reflects the new status.
+      // Re-load an open working-copy diff so it reflects the new status. Any
+      // line selection is dropped: it indexes into the diff we just replaced.
       const sel = get().selectedFile
       if (sel && sel.kind === 'working') {
         const all = [...(get().status?.staged ?? []), ...(get().status?.unstaged ?? [])]
         const match = all.find((f) => f.path === sel.path && f.staged === sel.staged)
         if (match) {
           const d = await api.diffWorking(p, sel.path, sel.staged, sel.untracked)
-          set({ diff: d.ok ? (d.data as FileDiff) : null })
+          set({ diff: d.ok ? (d.data as FileDiff) : null, lineSelection: null })
         } else {
-          set({ selectedFile: null, diff: null })
+          set({ selectedFile: null, diff: null, lineSelection: null })
         }
       }
     },
@@ -478,7 +563,8 @@ export const useStore = create<AppState>((set, get) => {
       set({
         selectedFile: { kind: 'working', path: file.path, staged: file.staged, untracked },
         diffLoading: true,
-        diff: null
+        diff: null,
+        lineSelection: null
       })
       const res = await api.diffWorking(p, file.path, file.staged, untracked)
       set({ diff: res.ok ? (res.data as FileDiff) : null, diffLoading: false })
@@ -580,29 +666,53 @@ export const useStore = create<AppState>((set, get) => {
       }
     },
 
-    stageHunk: async (patch) => {
+    // The three patch actions clear any line selection: it indexes into a diff
+    // that is about to be reloaded, so its hunk/line numbers no longer hold.
+    stageHunk: async (patch, what = 'hunk') => {
       const p = get().activeRepoPath
       if (!p) return
-      if (await runAction('Staging hunk', () => api.applyPatch(p, patch, { cached: true })))
+      if (await runAction(`Staging ${what}`, () => api.applyPatch(p, patch, { cached: true }))) {
+        set({ lineSelection: null })
         await get().refreshStatus()
+      }
     },
 
-    unstageHunk: async (patch) => {
+    unstageHunk: async (patch, what = 'hunk') => {
       const p = get().activeRepoPath
       if (!p) return
       if (
-        await runAction('Unstaging hunk', () =>
+        await runAction(`Unstaging ${what}`, () =>
           api.applyPatch(p, patch, { cached: true, reverse: true })
         )
-      )
+      ) {
+        set({ lineSelection: null })
         await get().refreshStatus()
+      }
     },
 
-    discardHunk: async (patch) => {
+    discardHunk: async (patch, what = 'hunk') => {
       const p = get().activeRepoPath
       if (!p) return
-      if (await runAction('Discarding hunk', () => api.applyPatch(p, patch, { reverse: true })))
+      if (await runAction(`Discarding ${what}`, () => api.applyPatch(p, patch, { reverse: true }))) {
+        set({ lineSelection: null })
         await get().refreshStatus()
+      }
+    },
+
+    setLineSelection: (selection) => set({ lineSelection: selection }),
+
+    applyLineSelection: async () => {
+      const t = lineTarget()
+      if (!t) return
+      if (t.staged) await get().unstageHunk(buildLinePatch(t.path, t.hunk, t.lines, 'reverse'), t.what)
+      else await get().stageHunk(buildLinePatch(t.path, t.hunk, t.lines, 'forward'), t.what)
+    },
+
+    discardLineSelection: async () => {
+      const t = lineTarget()
+      // Nothing to discard on the staged side — unstage those lines instead.
+      if (!t || t.staged) return
+      await get().discardHunk(buildLinePatch(t.path, t.hunk, t.lines, 'reverse'), t.what)
     },
 
     commit: async (message, amend, push) => {
@@ -614,7 +724,9 @@ export const useStore = create<AppState>((set, get) => {
         push ? undefined : 'Commit created'
       )
       if (ok) {
-        set({ selectedFile: null, diff: null })
+        const drafts = { ...get().commitDrafts }
+        delete drafts[p]
+        set({ selectedFile: null, diff: null, commitDrafts: drafts })
         await get().refreshAll()
         if (push) {
           const st = get().status
@@ -623,6 +735,12 @@ export const useStore = create<AppState>((set, get) => {
         }
       }
       return ok
+    },
+
+    setCommitDraft: (message) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      set({ commitDrafts: { ...get().commitDrafts, [p]: message } })
     },
 
     push: async (setUpstream) => {
@@ -675,9 +793,10 @@ export const useStore = create<AppState>((set, get) => {
 
     deleteBranch: async (name, force) => {
       const p = get().activeRepoPath
-      if (!p) return
-      if (await runAction(`Deleting ${name}`, () => api.deleteBranch(p, name, force)))
-        await get().refreshAll()
+      if (!p) return false
+      const ok = await runAction(`Deleting ${name}`, () => api.deleteBranch(p, name, force))
+      if (ok) await get().refreshAll()
+      return ok
     },
 
     renameBranch: async (oldName, newName) => {
@@ -790,6 +909,16 @@ export const useStore = create<AppState>((set, get) => {
       const p = get().activeRepoPath
       if (!p) return
       await runAction('Opening terminal', () => api.openInTerminal(p))
+    },
+
+    resolveInMergeTool: async (file) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      await runAction(
+        'Opening merge tool',
+        () => api.mergeTool(p, file),
+        'Opened in VS Code — refresh once you have saved the resolution'
+      )
     },
 
     setHistoryBranch: async (ref) => {

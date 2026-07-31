@@ -4,6 +4,7 @@ export const CH = {
   reposList: 'repos:list',
   repoAdd: 'repos:add',
   repoRemove: 'repos:remove',
+  reposReorder: 'repos:reorder',
   groupsList: 'groups:list',
   groupCreate: 'groups:create',
   groupRename: 'groups:rename',
@@ -60,6 +61,7 @@ export const CH = {
   cherryPick: 'git:cherryPick',
   restoreFileFromCommit: 'git:restoreFileFromCommit',
   externalDiffCommit: 'git:externalDiffCommit',
+  mergeTool: 'git:mergeTool',
   copyText: 'clipboard:writeText',
   applyPatch: 'git:applyPatch',
   appRefresh: 'app:refresh'

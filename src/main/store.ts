@@ -51,6 +51,22 @@ export async function removeRepo(id: string): Promise<void> {
   if (changed) await writeGroups(groups)
 }
 
+/**
+ * Rewrites the bookmark order to match `ids`. The stored array's order is what
+ * the repository picker renders, so this is how a drag-reorder is persisted.
+ * Ids the caller did not mention (added by another window since it read the
+ * list) keep their relative order at the end rather than being dropped.
+ */
+export async function reorderRepos(ids: string[]): Promise<RepoBookmark[]> {
+  const list = await read()
+  const ranked = new Map(ids.map((id, i) => [id, i]))
+  const next = [...list].sort(
+    (a, b) => (ranked.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (ranked.get(b.id) ?? Number.MAX_SAFE_INTEGER)
+  )
+  await write(next)
+  return next
+}
+
 function groupsFile(): string {
   return join(app.getPath('userData'), 'groups.json')
 }

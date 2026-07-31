@@ -27,6 +27,8 @@ const api = {
   listRepos: (): Promise<RepoBookmark[]> => ipcRenderer.invoke(CH.reposList),
   addRepo: (path: string): Promise<GitResult<RepoBookmark>> => ipcRenderer.invoke(CH.repoAdd, path),
   removeRepo: (id: string): Promise<void> => ipcRenderer.invoke(CH.repoRemove, id),
+  reorderRepos: (ids: string[]): Promise<RepoBookmark[]> =>
+    ipcRenderer.invoke(CH.reposReorder, ids),
   listGroups: (): Promise<RepoGroup[]> => ipcRenderer.invoke(CH.groupsList),
   createGroup: (name: string): Promise<RepoGroup> => ipcRenderer.invoke(CH.groupCreate, name),
   renameGroup: (id: string, name: string): Promise<void> =>
@@ -138,6 +140,8 @@ const api = {
     ipcRenderer.invoke(CH.restoreFileFromCommit, p, hash, file),
   externalDiffCommit: (p: string, hash: string, file: string): Promise<GitResult> =>
     ipcRenderer.invoke(CH.externalDiffCommit, p, hash, file),
+  mergeTool: (p: string, file: string): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.mergeTool, p, file),
   copyText: (text: string): Promise<void> => ipcRenderer.invoke(CH.copyText, text),
   onRefresh: (cb: () => void): (() => void) => {
     const listener = (): void => cb()

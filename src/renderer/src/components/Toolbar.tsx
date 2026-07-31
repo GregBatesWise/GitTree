@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { Modal } from './Dialog'
 import { GroupsDialog } from './GroupsDialog'
+import { RepoPicker } from './RepoPicker'
 
 function NewBranchDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('')
@@ -179,10 +180,7 @@ function TBtn({
 }
 
 export function Toolbar() {
-  const repos = useStore((s) => s.repos)
-  const groups = useStore((s) => s.groups)
   const active = useStore((s) => s.activeRepoPath)
-  const selectRepo = useStore((s) => s.selectRepo)
   const addRepo = useStore((s) => s.addRepoViaDialog)
   const status = useStore((s) => s.status)
   const view = useStore((s) => s.view)
@@ -206,46 +204,9 @@ export function Toolbar() {
   const noUpstream = !!(hasRepo && status && status.branch && !status.upstream)
   const disabled = !hasRepo || !!busy
 
-  const groupedIds = new Set(groups.flatMap((g) => g.repoIds))
-  const ungrouped = repos.filter((r) => !groupedIds.has(r.id))
-
   return (
     <div className="toolbar">
-      <select
-        className="repo-select"
-        value={active ?? ''}
-        onChange={(e) => selectRepo(e.target.value)}
-      >
-        {!repos.length && <option value="">No repositories</option>}
-        {groups.length === 0
-          ? repos.map((r) => (
-              <option key={r.id} value={r.path}>
-                {r.name}
-              </option>
-            ))
-          : groups.map((g) => {
-              const members = repos.filter((r) => g.repoIds.includes(r.id))
-              if (!members.length) return null
-              return (
-                <optgroup key={g.id} label={g.name}>
-                  {members.map((r) => (
-                    <option key={r.id} value={r.path}>
-                      {r.name}
-                    </option>
-                  ))}
-                </optgroup>
-              )
-            })}
-        {groups.length > 0 && ungrouped.length > 0 && (
-          <optgroup label="Ungrouped">
-            {ungrouped.map((r) => (
-              <option key={r.id} value={r.path}>
-                {r.name}
-              </option>
-            ))}
-          </optgroup>
-        )}
-      </select>
+      <RepoPicker />
       <TBtn icon="＋" label="Add" onClick={addRepo} title="Add a local repository" />
       <TBtn
         icon={

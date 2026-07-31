@@ -1,11 +1,17 @@
-import { useStore } from '../store'
-import type { DiffLineType } from '@shared/types'
+import { useEffect, type MouseEvent as ReactMouseEvent } from 'react'
+import { activeLineSelection, useStore } from '../store'
+import type { DiffLine, DiffLineType } from '@shared/types'
 import { buildHunkPatch } from '../lib/patch'
 
 function marker(type: DiffLineType): string {
   if (type === 'add') return '+'
   if (type === 'del') return '-'
   return ''
+}
+
+/** Only added and removed lines can be picked; context lines carry no change. */
+function isPickable(l: DiffLine): boolean {
+  return l.type === 'add' || l.type === 'del'
 }
 
 export function DiffViewer() {
@@ -15,6 +21,20 @@ export function DiffViewer() {
   const stageHunk = useStore((s) => s.stageHunk)
   const unstageHunk = useStore((s) => s.unstageHunk)
   const discardHunk = useStore((s) => s.discardHunk)
+  const lineSel = useStore(activeLineSelection)
+  const setLineSel = useStore((s) => s.setLineSelection)
+  const applyLines = useStore((s) => s.applyLineSelection)
+  const discardLines = useStore((s) => s.discardLineSelection)
+
+  // Escape is the way out of a line selection, mirroring the file list.
+  useEffect(() => {
+    if (!lineSel) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setLineSel(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [lineSel, setLineSel])
 
   if (!sel) {
     return (
@@ -24,8 +44,44 @@ export function DiffViewer() {
     )
   }
 
-  // Per-hunk staging only applies to tracked working-copy changes.
+  // Per-hunk and per-line staging only apply to tracked working-copy changes.
   const hunkActions = sel.kind === 'working' && !sel.untracked
+  const picked = (hunkIndex: number, lineIndex: number): boolean =>
+    !!lineSel && lineSel.hunkIndex === hunkIndex && lineSel.lines.includes(lineIndex)
+
+  const lineClick = (hunkIndex: number, lineIndex: number, e: ReactMouseEvent): void => {
+    if (!hunkActions || !diff) return
+    // A drag that selected text is a copy gesture, not a pick.
+    if (!window.getSelection()?.isCollapsed) return
+    const lines = diff.hunks[hunkIndex].lines
+    if (!isPickable(lines[lineIndex])) {
+      setLineSel(null)
+      return
+    }
+    const base = { path: sel.path, staged: sel.staged, hunkIndex }
+    const sameHunk = lineSel && lineSel.hunkIndex === hunkIndex
+    if (e.shiftKey && sameHunk) {
+      const [lo, hi] =
+        lineSel.anchor < lineIndex ? [lineSel.anchor, lineIndex] : [lineIndex, lineSel.anchor]
+      const range: number[] = []
+      for (let i = lo; i <= hi; i++) if (isPickable(lines[i])) range.push(i)
+      setLineSel({ ...base, lines: range, anchor: lineSel.anchor })
+      return
+    }
+    if ((e.ctrlKey || e.metaKey) && sameHunk) {
+      const next = lineSel.lines.includes(lineIndex)
+        ? lineSel.lines.filter((i) => i !== lineIndex)
+        : [...lineSel.lines, lineIndex].sort((a, b) => a - b)
+      setLineSel(next.length ? { ...base, lines: next, anchor: lineIndex } : null)
+      return
+    }
+    // Clicking the only picked line again is the quickest way to clear it.
+    const only = sameHunk && lineSel.lines.length === 1 && lineSel.lines[0] === lineIndex
+    setLineSel(only ? null : { ...base, lines: [lineIndex], anchor: lineIndex })
+  }
+
+  const count = lineSel?.lines.length ?? 0
+  const lineLabel = `${count} Line${count === 1 ? '' : 's'}`
 
   return (
     <div className="diff">
@@ -49,7 +105,33 @@ export function DiffViewer() {
                   <span className="content">{h.header}</span>
                   {hunkActions && (
                     <span className="hunk-actions">
-                      {sel.staged ? (
+                      {lineSel?.hunkIndex === hi ? (
+                        <>
+                          <button
+                            className="mini-btn"
+                            title={
+                              sel.staged
+                                ? 'Unstage only the selected lines (Space)'
+                                : 'Stage only the selected lines (Space)'
+                            }
+                            onClick={() => applyLines()}
+                          >
+                            {sel.staged ? 'Unstage' : 'Stage'} {lineLabel}
+                          </button>
+                          {!sel.staged && (
+                            <button
+                              className="mini-btn danger"
+                              title="Discard only the selected lines"
+                              onClick={() => {
+                                if (confirm(`Discard ${count} selected line(s)? This cannot be undone.`))
+                                  discardLines()
+                              }}
+                            >
+                              Discard {lineLabel}
+                            </button>
+                          )}
+                        </>
+                      ) : sel.staged ? (
                         <button
                           className="mini-btn"
                           title="Unstage this hunk"
@@ -92,7 +174,15 @@ export function DiffViewer() {
                           ? ' del'
                           : l.type === 'meta'
                             ? ' meta'
-                            : '')
+                            : '') +
+                      (hunkActions && isPickable(l) ? ' pickable' : '') +
+                      (picked(hi, li) ? ' picked' : '')
+                    }
+                    onClick={(e) => lineClick(hi, li, e)}
+                    title={
+                      hunkActions && isPickable(l)
+                        ? 'Click to select this line — shift-click for a range, Ctrl+click to add'
+                        : undefined
                     }
                   >
                     <span className="gutter">{l.oldNumber ?? ''}</span>
