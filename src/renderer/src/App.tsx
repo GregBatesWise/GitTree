@@ -65,6 +65,17 @@ export default function App() {
 
   useEffect(() => window.api.onRefresh(() => refreshAll()), [refreshAll])
 
+  // Coming back to the app is the moment the on-screen state is most likely to
+  // be stale (commits made in a terminal, branches changed elsewhere).
+  useEffect(() => {
+    const onFocus = (): void => {
+      const s = useStore.getState()
+      if (s.activeRepoPath && !s.busy && !s.loading) s.refreshAll()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
   useEffect(() => {
     if (!toast) return
     const t = setTimeout(dismissToast, 2500)

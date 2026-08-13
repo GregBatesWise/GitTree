@@ -1,5 +1,7 @@
 import { ipcMain, dialog, shell, clipboard, BrowserWindow } from 'electron'
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { isAbsolute, relative, resolve } from 'node:path'
 import { CH } from '../shared/channels'
 import type {
   ApplyPatchOptions,
@@ -70,6 +72,34 @@ function spawnDetached(cmd: string, args: string[], cwd: string): Promise<void> 
       resolve()
     })
   })
+}
+
+/** Preferred editor for "Open", falling back to the OS default when absent. */
+const NOTEPADPP_PATHS = [
+  'C:\\Program Files\\Notepad++\\notepad++.exe',
+  'C:\\Program Files (x86)\\Notepad++\\notepad++.exe'
+]
+
+/** Opens a repository file in Notepad++, or the OS default handler if it is not installed. */
+async function openFileInEditor(cwd: string, file: string): Promise<void> {
+  const full = resolve(cwd, file)
+  // The path comes from the renderer, so never let it escape the repository.
+  const rel = relative(cwd, full)
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`Refusing to open a path outside the repository: ${file}`)
+  }
+  if (!existsSync(full)) {
+    throw new Error(`"${file}" does not exist in the working copy.`)
+  }
+  if (process.platform === 'win32') {
+    const exe = NOTEPADPP_PATHS.find((p) => existsSync(p))
+    if (exe) {
+      await spawnDetached(exe, [full], cwd)
+      return
+    }
+  }
+  const err = await shell.openPath(full)
+  if (err) throw new Error(err)
 }
 
 /** Launches the user's configured Git difftool for a file at a commit vs. its parent. */
@@ -176,6 +206,9 @@ export function registerIpc(): void {
     })
   )
   ipcMain.handle(CH.openInTerminal, (_e, p: string) => wrap(() => openTerminal(p)))
+  ipcMain.handle(CH.openFile, (_e, p: string, file: string) =>
+    wrap(() => openFileInEditor(p, file))
+  )
 
   ipcMain.handle(CH.status, (_e, p: string) => wrap(() => repo.status(p)))
   ipcMain.handle(CH.log, (_e, p: string, limit?: number, ref?: string) =>

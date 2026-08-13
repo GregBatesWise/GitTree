@@ -157,6 +157,8 @@ export interface AppState {
 
   revealInFileManager: () => Promise<void>
   openInTerminal: () => Promise<void>
+  /** Opens a working-copy file in the external editor (Notepad++ on Windows). */
+  openFile: (file: string) => Promise<void>
   resolveInMergeTool: (file: string) => Promise<void>
 
   setHistoryBranch: (ref: string) => Promise<void>
@@ -274,6 +276,9 @@ export const useStore = create<AppState>((set, get) => {
     selectRepo: async (path) => {
       set({
         activeRepoPath: path,
+        // An action still running against the previous repo must not leave the
+        // new repo's UI (commit box, dialogs) disabled once it finally lands.
+        busy: null,
         selectedCommit: null,
         commitDetail: null,
         compareCommit: null,
@@ -409,6 +414,9 @@ export const useStore = create<AppState>((set, get) => {
         api.submodules(p)
       ])
       const firstErr = [st, lg, br, sh, rm, tg, sm].find((r) => !r.ok)
+      // The user can switch repo while these are in flight; publishing then
+      // would overwrite the new repo's state with this one's.
+      if (get().activeRepoPath !== p) return
       set({
         status: st.ok ? (st.data as StatusResult) : null,
         commits: lg.ok ? (lg.data as CommitInfo[]) : [],
@@ -443,6 +451,7 @@ export const useStore = create<AppState>((set, get) => {
       const p = get().activeRepoPath
       if (!p) return
       const st = await api.status(p)
+      if (get().activeRepoPath !== p) return
       if (!st.ok) {
         set({ error: st.error || 'Failed to load status' })
         return
@@ -909,6 +918,12 @@ export const useStore = create<AppState>((set, get) => {
       const p = get().activeRepoPath
       if (!p) return
       await runAction('Opening terminal', () => api.openInTerminal(p))
+    },
+
+    openFile: async (file) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      await runAction('Opening file', () => api.openFile(p, file))
     },
 
     resolveInMergeTool: async (file) => {

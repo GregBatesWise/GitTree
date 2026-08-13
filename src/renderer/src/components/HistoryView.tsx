@@ -103,10 +103,12 @@ function CommitMeta({ detail }: { detail: CommitDetail }) {
   const selectedFile = useStore((s) => s.selectedFile)
   const restoreFile = useStore((s) => s.restoreFileFromCommit)
   const externalDiff = useStore((s) => s.externalDiffCommit)
+  const openFile = useStore((s) => s.openFile)
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null)
   const c = detail.commit
 
   const fileMenu = (path: string): MenuItem[] => [
+    { label: 'Open', onClick: () => openFile(path) },
     {
       label: 'Reset to Commit',
       onClick: () => {
@@ -260,6 +262,10 @@ export function HistoryView() {
     900,
     'y'
   )
+  // Message takes whatever the three fixed columns leave.
+  const { size: authorW, onResizeStart: onAuthorResize } = useResizable('histColAuthor', 150, 60, 400)
+  const { size: dateW, onResizeStart: onDateResize } = useResizable('histColDate', 150, 80, 400)
+  const { size: hashW, onResizeStart: onHashResize } = useResizable('histColHash', 90, 60, 300)
 
   const locals = branches.filter((b) => !b.isRemote)
   const remoteBranches = branches.filter((b) => b.isRemote)
@@ -377,6 +383,49 @@ export function HistoryView() {
       <div className="commit-scroll" style={{ flex: 'none', height: listHeight }}>
         {filtered.length ? (
           <table className="commit-table">
+            <colgroup>
+              <col style={{ width: graphWidth }} />
+              <col />
+              <col style={{ width: authorW }} />
+              <col style={{ width: dateW }} />
+              <col style={{ width: hashW }} />
+            </colgroup>
+            <thead>
+              <tr className="commit-head">
+                <th className="col-graph" />
+                <th className="col-msg">Message</th>
+                <th className="col-author">
+                  Author
+                  <span
+                    className="col-resizer"
+                    onMouseDown={onAuthorResize}
+                    role="separator"
+                    aria-orientation="vertical"
+                    title="Drag to resize"
+                  />
+                </th>
+                <th className="col-date">
+                  Date
+                  <span
+                    className="col-resizer"
+                    onMouseDown={onDateResize}
+                    role="separator"
+                    aria-orientation="vertical"
+                    title="Drag to resize"
+                  />
+                </th>
+                <th className="col-hash">
+                  SHA
+                  <span
+                    className="col-resizer"
+                    onMouseDown={onHashResize}
+                    role="separator"
+                    aria-orientation="vertical"
+                    title="Drag to resize"
+                  />
+                </th>
+              </tr>
+            </thead>
             <tbody>
               {filtered.map((c, i) => (
                 <tr

@@ -390,6 +390,15 @@ body.resizing-v {
   font-family: var(--mono);
 }
 
+/* Local branch that also exists on a remote. */
+.remote-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--green);
+  opacity: 0.85;
+}
+
 /* Branch whose upstream was deleted on the remote — i.e. ready to delete
    locally. Unscoped: the sidebar row and the delete dialog both use it. */
 .gone-badge {
@@ -459,6 +468,54 @@ body.resizing-v {
 .commit-table {
   width: 100%;
   border-collapse: collapse;
+  /* Required for the <col> widths the column resizers drive. */
+  table-layout: fixed;
+}
+
+.commit-head th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 24px;
+  /* Body cells have no padding, so headers must not either, or the labels
+     would sit off the columns they name. */
+  padding: 0;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+}
+
+.col-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 9px;
+  cursor: col-resize;
+}
+
+/* A permanently visible grip so the drag target is discoverable. */
+.col-resizer::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  right: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border-soft);
+}
+
+.col-resizer:hover::after {
+  top: 0;
+  bottom: 0;
+  background: var(--accent);
 }
 
 .commit-row {
@@ -548,6 +605,8 @@ body.resizing-v {
   padding: 0 10px;
   color: var(--text-dim);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 12px;
 }
 
@@ -606,7 +665,20 @@ body.resizing-v {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/* The metadata never squeezes the file list out of existence: it takes at most
+   half the pane and scrolls its own overflow, the list takes what is left. */
+.detail-left > .detail-meta {
+  flex: 0 0 auto;
+  max-height: 50%;
   overflow: auto;
+}
+
+.detail-left > .file-list {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .detail-meta {

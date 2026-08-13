@@ -164,6 +164,13 @@ export function Sidebar({ width }: { width?: number }) {
   const remoteBranches = branches.filter((b) => b.isRemote)
   const changes = (status?.staged.length ?? 0) + (status?.unstaged.length ?? 0)
 
+  // The remote counterpart of a local branch: its upstream when one is
+  // configured, otherwise a same-named branch that exists on a remote.
+  const remoteFor = (b: BranchInfo): string | null => {
+    if (b.upstream) return b.upstream
+    return remoteBranches.find((r) => r.name.replace(/^[^/]+\//, '') === b.name)?.name ?? null
+  }
+
   const buildBranchMenu = (b: BranchInfo): MenuItem[] => {
     const items: MenuItem[] = []
     if (!b.current) items.push({ label: 'Checkout', onClick: () => checkout(b.name) })
@@ -225,6 +232,11 @@ export function Sidebar({ width }: { width?: number }) {
               >
                 <span className="ico">{b.current ? '●' : '○'}</span>
                 <span className="label">{b.name}</span>
+                {!b.gone && remoteFor(b) && (
+                  <span className="remote-badge" title={`Remote branch: ${remoteFor(b)}`}>
+                    ⇅
+                  </span>
+                )}
                 {b.ahead || b.behind ? (
                   <span className="track">
                     {b.ahead ? `↑${b.ahead}` : ''}

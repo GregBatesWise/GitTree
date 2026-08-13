@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { activeLineSelection, useStore } from '../store'
 import { DiffViewer } from './DiffViewer'
+import { ContextMenu, type MenuItem } from './ContextMenu'
 import { useResizable } from '../lib/useResizable'
 import { claimsKey, nextRowIndex } from '../lib/keys'
 import type { FileChange } from '@shared/types'
@@ -34,6 +35,7 @@ function FileRow({
   active,
   multi,
   onClick,
+  onContextMenu,
   onStage,
   onUnstage,
   onDiscard,
@@ -44,6 +46,7 @@ function FileRow({
   active: boolean
   multi: boolean
   onClick: (e: ReactMouseEvent) => void
+  onContextMenu: (e: ReactMouseEvent) => void
   onStage: () => void
   onUnstage: () => void
   onDiscard: () => void
@@ -53,6 +56,7 @@ function FileRow({
     <div
       className={'file-row' + (active ? ' selected' : '') + (multi ? ' multi' : '')}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}
     >
       <span className={'st ' + file.status}>{statusLetter(file.status)}</span>
@@ -177,6 +181,7 @@ export function WorkingCopy() {
   const stageAll = useStore((s) => s.stageAll)
   const unstageAll = useStore((s) => s.unstageAll)
   const resolveInMergeTool = useStore((s) => s.resolveInMergeTool)
+  const openFile = useStore((s) => s.openFile)
   const active = useStore((s) => s.activeRepoPath)
   const { size: leftWidth, onResizeStart } = useResizable('wcLeftWidth', 460, 280, 1000)
 
@@ -189,6 +194,13 @@ export function WorkingCopy() {
     side: Side
     paths: string[]
     anchor: string
+  } | null>(null)
+
+  const [menu, setMenu] = useState<{
+    x: number
+    y: number
+    path: string
+    deleted: boolean
   } | null>(null)
 
   // Space stages the selected unstaged file(s) (or unstages the selected staged
@@ -354,6 +366,19 @@ export function WorkingCopy() {
     }
   }
 
+  const openMenu = (e: ReactMouseEvent, file: FileChange): void => {
+    e.preventDefault()
+    setMenu({ x: e.clientX, y: e.clientY, path: file.path, deleted: file.status === 'deleted' })
+  }
+
+  const fileMenu = (path: string, deleted: boolean): MenuItem[] => [
+    {
+      label: 'Open',
+      disabled: deleted,
+      onClick: () => openFile(path)
+    }
+  ]
+
   return (
     <div className="working">
       <div className="wc-left" style={{ width: leftWidth, flexShrink: 0 }}>
@@ -380,6 +405,7 @@ export function WorkingCopy() {
                 active={sel?.kind === 'working' && sel.path === f.path && sel.staged === f.staged}
                 multi={isMulti('staged', f.path)}
                 onClick={(e) => rowClick('staged', f, e)}
+                onContextMenu={(e) => openMenu(e, f)}
                 onStage={() => doStage(f.path)}
                 onUnstage={() => doUnstage(f.path)}
                 onDiscard={() => doDiscard(f.path)}
@@ -418,6 +444,7 @@ export function WorkingCopy() {
                 active={sel?.kind === 'working' && sel.path === f.path && sel.staged === f.staged}
                 multi={isMulti('unstaged', f.path)}
                 onClick={(e) => rowClick('unstaged', f, e)}
+                onContextMenu={(e) => openMenu(e, f)}
                 onStage={() => doStage(f.path)}
                 onUnstage={() => doUnstage(f.path)}
                 onDiscard={() => doDiscard(f.path)}
@@ -442,6 +469,14 @@ export function WorkingCopy() {
         title="Drag to resize"
       />
       <DiffViewer />
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={fileMenu(menu.path, menu.deleted)}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   )
 }

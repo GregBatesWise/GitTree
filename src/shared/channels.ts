@@ -16,6 +16,7 @@ export const CH = {
   openFolder: 'dialog:openFolder',
   revealInFileManager: 'shell:reveal',
   openInTerminal: 'shell:terminal',
+  openFile: 'shell:openFile',
 
   status: 'git:status',
   log: 'git:log',

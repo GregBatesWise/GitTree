@@ -45,6 +45,8 @@ const api = {
   revealInFileManager: (p: string): Promise<GitResult> =>
     ipcRenderer.invoke(CH.revealInFileManager, p),
   openInTerminal: (p: string): Promise<GitResult> => ipcRenderer.invoke(CH.openInTerminal, p),
+  openFile: (p: string, file: string): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.openFile, p, file),
 
   status: (p: string): Promise<GitResult<StatusResult>> => ipcRenderer.invoke(CH.status, p),
   log: (p: string, limit?: number, ref?: string): Promise<GitResult<CommitInfo[]>> =>
