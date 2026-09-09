@@ -9,6 +9,7 @@ import type {
   FileChange,
   FileDiff,
   GitResult,
+  GroupRepoResult,
   RemoteInfo,
   RepoBookmark,
   RepoGroup,
@@ -54,6 +55,9 @@ export interface AppState {
   repos: RepoBookmark[]
   groups: RepoGroup[]
   activeRepoPath: string | null
+  /** Toolbar group filter for the repo picker; null shows every repository.
+   *  Persisted via AppSettings.lastGroupId. */
+  activeGroupId: string | null
   view: MainView
 
   status: StatusResult | null
@@ -84,6 +88,10 @@ export interface AppState {
    *  not discard what the user has typed. In-memory only — not persisted. */
   commitDrafts: Record<string, string>
 
+  /** Whether the group's feature id is appended to commit messages. Persisted
+   *  via AppSettings; defaults to true. */
+  appendFeatureId: boolean
+
   loading: boolean
   busy: string | null
   error: string | null
@@ -98,8 +106,27 @@ export interface AppState {
   createGroup: (name: string) => Promise<void>
   renameGroup: (id: string, name: string) => Promise<void>
   deleteGroup: (id: string) => Promise<void>
-  assignGroup: (repoId: string, groupId: string | null) => Promise<void>
+  /** Toggles one repository's membership of one group. A repository may belong
+   *  to any number of groups at once. */
+  setGroupMembership: (repoId: string, groupId: string, member: boolean) => Promise<void>
+  /** Sets the toolbar group filter (null = All repos), keeping the working copy
+   *  inside the newly selected group. */
+  setActiveGroup: (groupId: string | null) => Promise<void>
   setGroupFeatureId: (id: string, featureId: string) => Promise<void>
+  /** Dry run of createGroupBranch, so blockers show before anything is changed. */
+  checkGroupBranch: (
+    paths: string[],
+    base: string,
+    branch: string
+  ) => Promise<GroupRepoResult[] | null>
+  createGroupBranch: (
+    paths: string[],
+    base: string,
+    branch: string
+  ) => Promise<GroupRepoResult[] | null>
+  /** Dry run of checkoutGroupBranch, so blockers show before anything is changed. */
+  checkGroupCheckout: (paths: string[], branch: string) => Promise<GroupRepoResult[] | null>
+  checkoutGroupBranch: (paths: string[], branch: string) => Promise<GroupRepoResult[] | null>
   refreshAll: () => Promise<void>
   refreshStatus: () => Promise<void>
   setView: (view: MainView) => void
@@ -130,6 +157,7 @@ export interface AppState {
   discardLineSelection: () => Promise<void>
   commit: (message: string, amend: boolean, push: boolean) => Promise<boolean>
   setCommitDraft: (message: string) => void
+  setAppendFeatureId: (on: boolean) => void
 
   push: (setUpstream: boolean) => Promise<void>
   pull: () => Promise<void>
@@ -235,6 +263,7 @@ export const useStore = create<AppState>((set, get) => {
     repos: [],
     groups: [],
     activeRepoPath: null,
+    activeGroupId: null,
     view: 'working',
     status: null,
     commits: [],
@@ -257,6 +286,7 @@ export const useStore = create<AppState>((set, get) => {
     diffLoading: false,
     lineSelection: null,
     commitDrafts: {},
+    appendFeatureId: true,
     loading: false,
     busy: null,
     error: null,
@@ -266,10 +296,20 @@ export const useStore = create<AppState>((set, get) => {
       const repos = await api.listRepos()
       const groups = await api.listGroups()
       const settings = await api.getSettings()
-      set({ repos, groups })
+      // Restore the group filter, dropping a stale id left by a deleted group.
+      const activeGroupId = groups.some((g) => g.id === settings.lastGroupId)
+        ? (settings.lastGroupId as string)
+        : null
+      // Undefined means the setting predates the checkbox: opt the user IN, as
+      // the suffix has always been appended until now.
+      set({ repos, groups, activeGroupId, appendFeatureId: settings.appendFeatureId !== false })
       if (repos.length) {
-        const last = repos.find((r) => r.path === settings.lastRepoPath)
-        await get().selectRepo((last ?? repos[0]).path)
+        // The last repo only wins when it is inside the restored group filter.
+        const group = groups.find((g) => g.id === activeGroupId)
+        const pool = group ? repos.filter((r) => group.repoIds.includes(r.id)) : repos
+        const candidates = pool.length ? pool : repos
+        const last = candidates.find((r) => r.path === settings.lastRepoPath)
+        await get().selectRepo((last ?? candidates[0]).path)
       }
     },
 
@@ -298,11 +338,9 @@ export const useStore = create<AppState>((set, get) => {
         historyBranchAuto: true,
         historyQuery: ''
       })
-      const repo = get().repos.find((r) => r.path === path)
-      const groupId = repo
-        ? (get().groups.find((g) => g.repoIds.includes(repo.id))?.id ?? null)
-        : null
-      await api.setSettings({ lastRepoPath: path, lastGroupId: groupId ?? undefined })
+      // The group filter (lastGroupId) is owned by setActiveGroup, not by repo
+      // selection — picking a repo no longer changes which group is filtered in.
+      await api.setSettings({ lastRepoPath: path })
       await get().refreshAll()
     },
 
@@ -329,8 +367,12 @@ export const useStore = create<AppState>((set, get) => {
       set({ repos, commitDrafts: drafts })
       await get().loadGroups()
       if (wasActive) {
-        if (repos.length) await get().selectRepo(repos[0].path)
-        else
+        if (repos.length) {
+          // Stay inside the group filter when it still has members.
+          const group = get().groups.find((g) => g.id === get().activeGroupId)
+          const pool = group ? repos.filter((r) => group.repoIds.includes(r.id)) : repos
+          await get().selectRepo((pool[0] ?? repos[0]).path)
+        } else
           set({
             activeRepoPath: null,
             status: null,
@@ -381,17 +423,118 @@ export const useStore = create<AppState>((set, get) => {
 
     deleteGroup: async (id) => {
       await api.deleteGroup(id)
+      // Deleting the filtered group drops the filter back to All repos.
+      if (get().activeGroupId === id) {
+        set({ activeGroupId: null })
+        void api.setSettings({ lastGroupId: undefined })
+      }
       await get().loadGroups()
     },
 
-    assignGroup: async (repoId, groupId) => {
-      await api.assignGroup(repoId, groupId)
+    setGroupMembership: async (repoId, groupId, member) => {
+      await api.setGroupMembership(repoId, groupId, member)
       await get().loadGroups()
+    },
+
+    setActiveGroup: async (groupId) => {
+      const id = groupId && get().groups.some((g) => g.id === groupId) ? groupId : null
+      set({ activeGroupId: id })
+      void api.setSettings({ lastGroupId: id ?? undefined })
+      if (!id) return
+      // Keep the working copy inside the group: when the current repository is
+      // not a member, switch to the group's first repository.
+      const group = get().groups.find((g) => g.id === id)
+      const members = get().repos.filter((r) => group?.repoIds.includes(r.id))
+      if (members.length && !members.some((r) => r.path === get().activeRepoPath)) {
+        await get().selectRepo(members[0].path)
+      }
     },
 
     setGroupFeatureId: async (id, featureId) => {
       await api.setGroupFeatureId(id, featureId)
       await get().loadGroups()
+    },
+
+    checkGroupBranch: async (paths, base, branch) => {
+      set({ busy: 'Checking repositories', error: null })
+      try {
+        const res = await api.checkGroupBranch(paths, base, branch)
+        if (!res.ok) {
+          set({ error: res.error || 'Check failed' })
+          return null
+        }
+        return res.data as GroupRepoResult[]
+      } catch (e) {
+        set({ error: String((e as Error)?.message || e) })
+        return null
+      } finally {
+        set({ busy: null })
+      }
+    },
+
+    createGroupBranch: async (paths, base, branch) => {
+      set({ busy: `Creating ${branch}`, error: null })
+      try {
+        const res = await api.createGroupBranch(paths, base, branch)
+        if (!res.ok) {
+          set({ error: res.error || 'Create branch failed' })
+          return null
+        }
+        const results = res.data as GroupRepoResult[]
+        const done = results.filter((r) => r.ok).length
+        if (done === results.length) {
+          set({ toast: `Created ${branch} in ${done} repositor${done === 1 ? 'y' : 'ies'}` })
+        }
+        const active = get().activeRepoPath
+        if (active && paths.includes(active)) await get().refreshAll()
+        return results
+      } catch (e) {
+        set({ error: String((e as Error)?.message || e) })
+        return null
+      } finally {
+        set({ busy: null })
+      }
+    },
+
+    checkGroupCheckout: async (paths, branch) => {
+      set({ busy: 'Checking repositories', error: null })
+      try {
+        const res = await api.checkGroupCheckout(paths, branch)
+        if (!res.ok) {
+          set({ error: res.error || 'Check failed' })
+          return null
+        }
+        return res.data as GroupRepoResult[]
+      } catch (e) {
+        set({ error: String((e as Error)?.message || e) })
+        return null
+      } finally {
+        set({ busy: null })
+      }
+    },
+
+    checkoutGroupBranch: async (paths, branch) => {
+      set({ busy: `Checking out ${branch}`, error: null })
+      try {
+        const res = await api.checkoutGroupBranch(paths, branch)
+        if (!res.ok) {
+          set({ error: res.error || 'Checkout failed' })
+          return null
+        }
+        const results = res.data as GroupRepoResult[]
+        const done = results.filter((r) => r.ok).length
+        if (done === results.length) {
+          set({ toast: `Checked out ${branch} in ${done} repositor${done === 1 ? 'y' : 'ies'}` })
+        }
+        const active = get().activeRepoPath
+        if (active && paths.includes(active)) await get().refreshAll()
+        return results
+      } catch (e) {
+        set({ error: String((e as Error)?.message || e) })
+        return null
+      } finally {
+        set({ busy: null })
+      }
     },
 
     refreshAll: async () => {
@@ -752,6 +895,11 @@ export const useStore = create<AppState>((set, get) => {
       set({ commitDrafts: { ...get().commitDrafts, [p]: message } })
     },
 
+    setAppendFeatureId: (on) => {
+      set({ appendFeatureId: on })
+      void api.setSettings({ appendFeatureId: on })
+    },
+
     push: async (setUpstream) => {
       const p = get().activeRepoPath
       if (!p) return
@@ -796,8 +944,12 @@ export const useStore = create<AppState>((set, get) => {
     mergeBranch: async (name) => {
       const p = get().activeRepoPath
       if (!p) return
-      if (await runAction(`Merging ${name}`, () => api.merge(p, name), `Merged ${name}`))
-        await get().refreshAll()
+      const merged = await runAction(`Merging ${name}`, () => api.merge(p, name), `Merged ${name}`)
+      // A merge that stops on conflicts makes runAction return false, but the
+      // working tree HAS changed (conflict markers + MERGE_HEAD). Refresh either
+      // way so the conflicted files show up without a manual refresh.
+      await get().refreshAll()
+      if (merged) set({ toast: `Merged ${name}` })
     },
 
     deleteBranch: async (name, force) => {

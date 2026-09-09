@@ -1,18 +1,23 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { Modal } from './Dialog'
+import { GroupBranchDialog } from './GroupBranchDialog'
 import type { RepoGroup } from '@shared/types'
 
 function GroupRow({
   group,
   onRename,
   onDelete,
-  onSetFeatureId
+  onSetFeatureId,
+  onStartBranch,
+  onCopyRepos
 }: {
   group: RepoGroup
   onRename: (id: string, name: string) => void
   onDelete: (id: string) => void
   onSetFeatureId: (id: string, featureId: string) => void
+  onStartBranch: (group: RepoGroup) => void
+  onCopyRepos: (group: RepoGroup) => void
 }) {
   const [name, setName] = useState(group.name)
   const [featureId, setFeatureId] = useState(group.featureId ?? '')
@@ -56,6 +61,22 @@ function GroupRow({
         {group.repoIds.length} repo{group.repoIds.length === 1 ? '' : 's'}
       </span>
       <button
+        className="btn btn-sm"
+        disabled={!group.repoIds.length}
+        title="Check out the base branch, pull, then create this group's branch in every repository"
+        onClick={() => onStartBranch(group)}
+      >
+        Start branch
+      </button>
+      <button
+        className="btn btn-sm"
+        disabled={!group.repoIds.length}
+        title="Copy this group's repository names to the clipboard, comma-separated"
+        onClick={() => onCopyRepos(group)}
+      >
+        Copy repos
+      </button>
+      <button
         className="btn btn-danger btn-sm"
         onClick={() => {
           if (confirm(`Delete group "${group.name}"? Repositories are kept, only the group is removed.`))
@@ -74,18 +95,34 @@ export function GroupsDialog({ onClose }: { onClose: () => void }) {
   const createGroup = useStore((s) => s.createGroup)
   const renameGroup = useStore((s) => s.renameGroup)
   const deleteGroup = useStore((s) => s.deleteGroup)
-  const assignGroup = useStore((s) => s.assignGroup)
+  const setGroupMembership = useStore((s) => s.setGroupMembership)
   const setGroupFeatureId = useStore((s) => s.setGroupFeatureId)
+  const copyText = useStore((s) => s.copyText)
   const [newName, setNewName] = useState('')
+  const [branchGroup, setBranchGroup] = useState<RepoGroup | null>(null)
+  // Which group's membership the checkboxes below edit; defaults to the first.
+  const [assignGroupId, setAssignGroupId] = useState('')
 
-  const groupOf = (repoId: string): string =>
-    groups.find((g) => g.repoIds.includes(repoId))?.id ?? ''
+  const assignTarget = groups.find((g) => g.id === assignGroupId) ?? groups[0] ?? null
 
   const addGroup = async (): Promise<void> => {
     const n = newName.trim()
     if (!n) return
     await createGroup(n)
     setNewName('')
+  }
+
+  const copyGroupRepos = (group: RepoGroup): void => {
+    const names = group.repoIds
+      .map((id) => repos.find((r) => r.id === id)?.name)
+      .filter((n): n is string => !!n)
+    if (names.length) void copyText(names.join(', '))
+  }
+
+  // Shown instead of the manager rather than stacked on top of it, so Escape
+  // steps back one dialog at a time.
+  if (branchGroup) {
+    return <GroupBranchDialog group={branchGroup} onClose={() => setBranchGroup(null)} />
   }
 
   return (
@@ -124,6 +161,8 @@ export function GroupsDialog({ onClose }: { onClose: () => void }) {
                 onRename={renameGroup}
                 onDelete={deleteGroup}
                 onSetFeatureId={setGroupFeatureId}
+                onStartBranch={setBranchGroup}
+                onCopyRepos={copyGroupRepos}
               />
             ))}
           </div>
@@ -131,25 +170,55 @@ export function GroupsDialog({ onClose }: { onClose: () => void }) {
 
         <div className="group-assign">
           <div className="group-assign-title">Assign repositories</div>
-          {!repos.length && <div className="side-empty">No repositories yet</div>}
-          {repos.map((r) => (
-            <div key={r.id} className="assign-row">
-              <span className="assign-name" title={r.path}>
-                {r.name}
-              </span>
+          {!groups.length && <div className="side-empty">Add a group above first</div>}
+          {groups.length > 0 && (
+            <>
               <select
-                value={groupOf(r.id)}
-                onChange={(e) => assignGroup(r.id, e.target.value || null)}
+                className="assign-group-select"
+                value={assignTarget?.id ?? ''}
+                onChange={(e) => setAssignGroupId(e.target.value)}
               >
-                <option value="">Ungrouped</option>
                 {groups.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.name}
                   </option>
                 ))}
               </select>
-            </div>
-          ))}
+              {!repos.length && <div className="side-empty">No repositories yet</div>}
+              <div className="assign-list">
+                {repos.map((r) => {
+                  // A repository can belong to any number of groups; the checkbox
+                  // toggles membership of the group chosen above only.
+                  const others = groups.filter(
+                    (g) => g.id !== assignTarget?.id && g.repoIds.includes(r.id)
+                  )
+                  return (
+                    <label key={r.id} className="assign-row">
+                      <input
+                        type="checkbox"
+                        checked={!!assignTarget?.repoIds.includes(r.id)}
+                        onChange={(e) => {
+                          if (assignTarget)
+                            void setGroupMembership(r.id, assignTarget.id, e.target.checked)
+                        }}
+                      />
+                      <span className="assign-name" title={r.path}>
+                        {r.name}
+                      </span>
+                      {others.length > 0 && (
+                        <span
+                          className="assign-also"
+                          title={`Also in: ${others.map((g) => g.name).join(', ')}`}
+                        >
+                          +{others.length} other{others.length === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </label>
+                  )
+                })}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </Modal>

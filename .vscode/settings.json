@@ -1,0 +1,5 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "npm --prefix \"C:\\Users\\greg.bates\\MyRepos\\git-desktop\"": true
+    }
+}

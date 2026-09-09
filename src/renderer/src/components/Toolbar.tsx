@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { Modal } from './Dialog'
+import { GroupCheckoutDialog } from './GroupCheckoutDialog'
+import { GroupPicker } from './GroupPicker'
 import { GroupsDialog } from './GroupsDialog'
 import { RepoPicker } from './RepoPicker'
 
@@ -192,12 +194,16 @@ export function Toolbar() {
   const openInTerminal = useStore((s) => s.openInTerminal)
   const revealFolder = useStore((s) => s.revealInFileManager)
   const busy = useStore((s) => s.busy)
+  const groups = useStore((s) => s.groups)
+  const activeGroupId = useStore((s) => s.activeGroupId)
 
   const [branchOpen, setBranchOpen] = useState(false)
   const [tagOpen, setTagOpen] = useState(false)
   const [stashOpen, setStashOpen] = useState(false)
   const [groupsOpen, setGroupsOpen] = useState(false)
+  const [checkoutOpen, setCheckoutOpen] = useState(false)
 
+  const activeGroup = groups.find((g) => g.id === activeGroupId) ?? null
   const hasRepo = !!active
   const ahead = status?.ahead ?? 0
   const behind = status?.behind ?? 0
@@ -206,6 +212,7 @@ export function Toolbar() {
 
   return (
     <div className="toolbar">
+      <GroupPicker />
       <RepoPicker />
       <TBtn icon="＋" label="Add" onClick={addRepo} title="Add a local repository" />
       <TBtn
@@ -218,6 +225,14 @@ export function Toolbar() {
         onClick={() => setGroupsOpen(true)}
         title="Manage repository groups"
       />
+      {activeGroup && (
+        <TBtn
+          icon="⇆"
+          label="Checkout branches"
+          onClick={() => setCheckoutOpen(true)}
+          title={`Check out an existing branch in every repository in "${activeGroup.name}"`}
+        />
+      )}
       <TBtn
         icon="❯"
         label="Terminal"
@@ -305,6 +320,9 @@ export function Toolbar() {
       {tagOpen && <NewTagDialog onClose={() => setTagOpen(false)} />}
       {stashOpen && <StashDialog onClose={() => setStashOpen(false)} />}
       {groupsOpen && <GroupsDialog onClose={() => setGroupsOpen(false)} />}
+      {checkoutOpen && activeGroup && (
+        <GroupCheckoutDialog group={activeGroup} onClose={() => setCheckoutOpen(false)} />
+      )}
     </div>
   )
 }

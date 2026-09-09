@@ -39,6 +39,8 @@ body {
   font-size: 13px;
   color: var(--text);
   background: var(--bg);
+  /* Also makes native widgets (select popups, scrollbars) use the dark palette. */
+  color-scheme: dark;
   user-select: none;
   overflow: hidden;
 }
@@ -51,6 +53,33 @@ textarea {
 button {
   font-family: inherit;
   cursor: pointer;
+}
+
+/* Native selects default to a light system palette, which reads as a white
+   block in this theme. */
+select {
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 5px 7px;
+  cursor: pointer;
+}
+
+select:hover {
+  border-color: var(--panel-3);
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--accent-dim);
+}
+
+select option {
+  background: var(--panel);
+  color: var(--text);
 }
 
 /* ---------- App shell ---------- */
@@ -92,6 +121,12 @@ button {
 /* ---------- Repository picker ---------- */
 .repo-picker {
   position: relative;
+}
+
+/* The group filter reuses the repo picker's look, only narrower. */
+.group-picker .repo-select {
+  min-width: 120px;
+  max-width: 200px;
 }
 
 .repo-select {
@@ -194,6 +229,12 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.repo-row .row-count {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  color: var(--text-dim);
 }
 
 .repo-remove {
@@ -845,6 +886,17 @@ body.resizing-v {
   background: var(--panel);
 }
 
+/* File rows are programmatically focusable (tabIndex -1) so a click does not
+   dump focus on <body> and eat the next keystrokes aimed at the commit box.
+   The mouse focus ring is hidden; the existing .selected highlight is the cue. */
+.file-row:focus {
+  outline: none;
+}
+.file-row:focus-visible {
+  outline: 1px solid var(--accent-dim);
+  outline-offset: -1px;
+}
+
 .commit-box textarea {
   width: 100%;
   resize: none;
@@ -1155,6 +1207,8 @@ body.resizing-v {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .group-item {
@@ -1199,8 +1253,114 @@ body.resizing-v {
   white-space: nowrap;
 }
 
-.assign-row select {
-  width: 150px;
+/* ---------- Group-wide branch flow ---------- */
+.group-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.group-flow-summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.group-flow-summary code {
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.group-flow-fields {
+  display: flex;
+  gap: 10px;
+}
+
+.group-flow-fields label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.group-flow-fields input {
+  font-family: var(--mono);
+}
+
+.group-flow-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.flow-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.flow-row .flow-icon {
+  width: 12px;
+}
+
+.flow-ok .flow-icon {
+  color: var(--green);
+}
+
+.flow-bad .flow-icon {
+  color: var(--red);
+}
+
+.flow-row .flow-name {
+  flex: 0 0 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-row .flow-msg {
+  flex: 1;
+  color: var(--text-dim);
+}
+
+.group-flow-note {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.assign-group-select {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.assign-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* .modal label would otherwise stack these vertically; the checkbox belongs
+   beside the repo name. */
+.modal label.assign-row {
+  flex-direction: row;
+  align-items: center;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.assign-also {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  color: var(--text-dim);
 }
 
 /* ---------- Status bar / toast / error ---------- */
@@ -1337,8 +1497,13 @@ body.resizing-v {
   background: var(--panel);
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  width: 420px;
+  width: 840px;
   max-width: 90vw;
+  /* Tall content (the groups manager) scrolls the body instead of growing the
+     modal past the window; title and footer stay pinned. */
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
   overflow: hidden;
 }
@@ -1356,6 +1521,8 @@ body.resizing-v {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .modal label {

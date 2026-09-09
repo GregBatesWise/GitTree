@@ -102,6 +102,7 @@ function RepoRow({
 export function RepoPicker() {
   const repos = useStore((s) => s.repos)
   const groups = useStore((s) => s.groups)
+  const activeGroupId = useStore((s) => s.activeGroupId)
   const active = useStore((s) => s.activeRepoPath)
   const selectRepo = useStore((s) => s.selectRepo)
   const reorderRepos = useStore((s) => s.reorderRepos)
@@ -112,6 +113,10 @@ export function RepoPicker() {
   const wrapRef = useRef<HTMLDivElement>(null)
 
   const activeRepo = repos.find((r) => r.path === active)
+  // With a group selected in the toolbar filter the menu lists only its
+  // members; with All repos it is one flat, ungrouped list.
+  const activeGroup = groups.find((g) => g.id === activeGroupId) ?? null
+  const visible = activeGroup ? repos.filter((r) => activeGroup.repoIds.includes(r.id)) : repos
 
   useEffect(() => {
     if (!open) return
@@ -130,9 +135,6 @@ export function RepoPicker() {
     }
   }, [open])
 
-  const groupIdOf = (repoId: string): string =>
-    groups.find((g) => g.repoIds.includes(repoId))?.id ?? ''
-
   /** Moves the dragged repo to `target`'s position in the stored bookmark order. */
   const dropOn = (e: ReactDragEvent, targetId: string): void => {
     // Without this, dropping something we did not start (a file from Explorer,
@@ -142,8 +144,13 @@ export function RepoPicker() {
     if (!dragId || dragId === targetId) return
     // Rows are rendered per group, so moving a repo past a group boundary would
     // change the stored order without moving the row. Reassigning groups is the
-    // Groups dialog's job; here a cross-group drop is simply not a reorder.
-    if (groupIdOf(dragId) !== groupIdOf(targetId)) return
+    // Groups dialog's job; here a cross-group drop is simply not a reorder. A
+    // repo may be in several groups, so "same bucket" means sharing any group,
+    // and two ungrouped repos count as the same bucket.
+    const dragGroups = groups.filter((g) => g.repoIds.includes(dragId))
+    const targetGroups = groups.filter((g) => g.repoIds.includes(targetId))
+    const bothUngrouped = !dragGroups.length && !targetGroups.length
+    if (!bothUngrouped && !dragGroups.some((g) => targetGroups.includes(g))) return
     const ids = repos.map((r) => r.id)
     const from = ids.indexOf(dragId)
     const to = ids.indexOf(targetId)
@@ -169,9 +176,6 @@ export function RepoPicker() {
     />
   )
 
-  const groupedIds = new Set(groups.flatMap((g) => g.repoIds))
-  const ungrouped = repos.filter((r) => !groupedIds.has(r.id))
-
   return (
     <div className="repo-picker" ref={wrapRef}>
       <button
@@ -186,22 +190,10 @@ export function RepoPicker() {
       {open && (
         <div className="repo-menu">
           {!repos.length && <div className="side-empty">No repositories yet</div>}
-          {groups.map((g) => {
-            const members = repos.filter((r) => g.repoIds.includes(r.id))
-            if (!members.length) return null
-            return (
-              <div key={g.id} className="repo-group">
-                <div className="repo-group-head">{g.name}</div>
-                {members.map(row)}
-              </div>
-            )
-          })}
-          {ungrouped.length > 0 && (
-            <div className="repo-group">
-              {groups.length > 0 && <div className="repo-group-head">Ungrouped</div>}
-              {ungrouped.map(row)}
-            </div>
+          {!!activeGroup && !visible.length && (
+            <div className="side-empty">No repositories in this group</div>
           )}
+          {visible.map(row)}
           {repos.length > 1 && <div className="repo-menu-hint">Drag a row to reorder</div>}
         </div>
       )}

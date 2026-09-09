@@ -10,6 +10,7 @@ import type {
   FetchOptions,
   FileDiff,
   GitResult,
+  GroupRepoResult,
   PullOptions,
   PushOptions,
   RemoteInfo,
@@ -34,10 +35,32 @@ const api = {
   renameGroup: (id: string, name: string): Promise<void> =>
     ipcRenderer.invoke(CH.groupRename, id, name),
   deleteGroup: (id: string): Promise<void> => ipcRenderer.invoke(CH.groupDelete, id),
-  assignGroup: (repoId: string, groupId: string | null): Promise<void> =>
-    ipcRenderer.invoke(CH.groupAssign, repoId, groupId),
+  setGroupMembership: (repoId: string, groupId: string, member: boolean): Promise<void> =>
+    ipcRenderer.invoke(CH.groupSetMembership, repoId, groupId, member),
   setGroupFeatureId: (id: string, featureId: string): Promise<void> =>
     ipcRenderer.invoke(CH.groupSetFeatureId, id, featureId),
+  checkGroupBranch: (
+    paths: string[],
+    base: string,
+    branch: string
+  ): Promise<GitResult<GroupRepoResult[]>> =>
+    ipcRenderer.invoke(CH.groupBranchCheck, paths, base, branch),
+  createGroupBranch: (
+    paths: string[],
+    base: string,
+    branch: string
+  ): Promise<GitResult<GroupRepoResult[]>> =>
+    ipcRenderer.invoke(CH.groupBranchRun, paths, base, branch),
+  checkGroupCheckout: (
+    paths: string[],
+    branch: string
+  ): Promise<GitResult<GroupRepoResult[]>> =>
+    ipcRenderer.invoke(CH.groupCheckoutCheck, paths, branch),
+  checkoutGroupBranch: (
+    paths: string[],
+    branch: string
+  ): Promise<GitResult<GroupRepoResult[]>> =>
+    ipcRenderer.invoke(CH.groupCheckoutRun, paths, branch),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke(CH.settingsGet),
   setSettings: (patch: Partial<AppSettings>): Promise<AppSettings> =>
     ipcRenderer.invoke(CH.settingsSet, patch),

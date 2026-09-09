@@ -17,6 +17,19 @@ export interface RepoGroup {
 export interface AppSettings {
   lastRepoPath?: string
   lastGroupId?: string
+  /**
+   * When true (the default) the active group's feature id is appended to every
+   * commit message. The commit box shows an opt-out checkbox bound to this.
+   */
+  appendFeatureId?: boolean
+}
+
+/** Outcome of one repository in a group-wide operation. */
+export interface GroupRepoResult {
+  path: string
+  ok: boolean
+  /** What was done, or why the repository is blocked. */
+  message: string
 }
 
 export interface CommitInfo {

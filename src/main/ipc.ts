@@ -181,11 +181,23 @@ export function registerIpc(): void {
   ipcMain.handle(CH.groupCreate, (_e, name: string) => store.createGroup(name))
   ipcMain.handle(CH.groupRename, (_e, id: string, name: string) => store.renameGroup(id, name))
   ipcMain.handle(CH.groupDelete, (_e, id: string) => store.deleteGroup(id))
-  ipcMain.handle(CH.groupAssign, (_e, repoId: string, groupId: string | null) =>
-    store.assignRepoToGroup(repoId, groupId)
+  ipcMain.handle(CH.groupSetMembership, (_e, repoId: string, groupId: string, member: boolean) =>
+    store.setRepoGroupMembership(repoId, groupId, member)
   )
   ipcMain.handle(CH.groupSetFeatureId, (_e, id: string, featureId: string) =>
     store.setGroupFeatureId(id, featureId)
+  )
+  ipcMain.handle(CH.groupBranchCheck, (_e, paths: string[], base: string, branch: string) =>
+    wrap(() => repo.checkGroupBranch(paths, base, branch))
+  )
+  ipcMain.handle(CH.groupBranchRun, (_e, paths: string[], base: string, branch: string) =>
+    wrap(() => repo.createGroupBranch(paths, base, branch))
+  )
+  ipcMain.handle(CH.groupCheckoutCheck, (_e, paths: string[], branch: string) =>
+    wrap(() => repo.checkGroupCheckout(paths, branch))
+  )
+  ipcMain.handle(CH.groupCheckoutRun, (_e, paths: string[], branch: string) =>
+    wrap(() => repo.checkoutGroupBranch(paths, branch))
   )
 
   ipcMain.handle(CH.settingsGet, () => store.getSettings())

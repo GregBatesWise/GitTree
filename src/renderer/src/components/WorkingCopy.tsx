@@ -53,8 +53,13 @@ function FileRow({
   onResolve: () => void
 }) {
   return (
+    // tabIndex makes the row focusable so clicking it does NOT move focus to
+    // <body>: without this, clicking a file mid-commit-message steals focus from
+    // the textarea and the next keystrokes go nowhere (Space even fires the
+    // staging shortcut), which reads as "the commit box is disabled".
     <div
       className={'file-row' + (active ? ' selected' : '') + (multi ? ' multi' : '')}
+      tabIndex={-1}
       onClick={onClick}
       onContextMenu={onContextMenu}
       title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}
@@ -102,6 +107,7 @@ function CommitBox() {
   const groups = useStore((s) => s.groups)
   const repos = useStore((s) => s.repos)
   const active = useStore((s) => s.activeRepoPath)
+  const activeGroupId = useStore((s) => s.activeGroupId)
   const commit = useStore((s) => s.commit)
   const busy = useStore((s) => s.busy)
 
@@ -109,10 +115,20 @@ function CommitBox() {
   const featureSuffix = useMemo(() => {
     const repo = repos.find((r) => r.path === active)
     if (!repo) return ''
-    const id = groups.find((g) => g.repoIds.includes(repo.id))?.featureId?.trim()
+    // A repo can be in several groups; prefer the group selected in the toolbar
+    // filter so the suffix matches the work being done, otherwise fall back to
+    // the first of the repo's groups that defines an id.
+    const mine = groups.filter((g) => g.repoIds.includes(repo.id))
+    const group = mine.find((g) => g.id === activeGroupId) ?? mine.find((g) => g.featureId?.trim())
+    const id = group?.featureId?.trim()
     if (!id) return ''
     return id.startsWith('#') ? id : `#${id}`
-  }, [groups, repos, active])
+  }, [groups, repos, active, activeGroupId])
+  // The user can opt out of the auto-append per group via this checkbox; the
+  // choice persists in AppSettings and defaults to on.
+  const appendFeatureId = useStore((s) => s.appendFeatureId)
+  const setAppendFeatureId = useStore((s) => s.setAppendFeatureId)
+  const willAppend = appendFeatureId && !!featureSuffix
 
   const stagedCount = status?.staged.length ?? 0
   const canPush = remotes.length > 0
@@ -120,9 +136,12 @@ function CommitBox() {
   const canCommit = message.trim().length > 0 && (stagedCount > 0 || amend) && !busy
 
   const onCommit = async (): Promise<void> => {
+    // Trimming first is what guarantees exactly one space before the suffix.
     const base = message.trim()
-    const finalMessage =
-      featureSuffix && !base.includes(featureSuffix) ? `${base} ${featureSuffix}` : base
+    // Compared token by token so "#123" is not treated as present in "#1234".
+    const suffix = willAppend ? featureSuffix : ''
+    const hasSuffix = !!suffix && base.split(/\s+/).includes(suffix)
+    const finalMessage = suffix && !hasSuffix ? `${base} ${suffix}` : base
     const ok = await commit(finalMessage, amend, willPush)
     // The store clears the draft itself on success; only the local flags reset here.
     if (ok) setAmend(false)
@@ -139,9 +158,17 @@ function CommitBox() {
         }}
       />
       {featureSuffix && (
-        <div className="commit-suffix-hint" title="Automatically appended to your commit message">
+        <label
+          className="amend commit-suffix-hint"
+          title="Automatically appended to your commit message"
+        >
+          <input
+            type="checkbox"
+            checked={appendFeatureId}
+            onChange={(e) => setAppendFeatureId(e.target.checked)}
+          />
           Appends <code>{featureSuffix}</code>
-        </div>
+        </label>
       )}
       <div className="commit-actions">
         <div className="commit-opts">

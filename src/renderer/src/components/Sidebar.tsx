@@ -138,6 +138,7 @@ export function Sidebar({ width }: { width?: number }) {
   const selectedStash = useStore((s) => s.selectedStash)
   const deleteTag = useStore((s) => s.deleteTag)
   const pushTag = useStore((s) => s.pushTag)
+  const copyText = useStore((s) => s.copyText)
   const updateSubmodules = useStore((s) => s.updateSubmodules)
   const updateSubmodule = useStore((s) => s.updateSubmodule)
 
@@ -184,6 +185,8 @@ export function Sidebar({ width }: { width?: number }) {
         onClick: () => setDeleteTarget(b)
       })
     }
+    items.push({ separator: true })
+    items.push({ label: 'Copy Branch Name', onClick: () => copyText(b.name) })
     return items
   }
 

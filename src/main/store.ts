@@ -122,15 +122,21 @@ export async function deleteGroup(id: string): Promise<void> {
   await writeGroups(list)
 }
 
-export async function assignRepoToGroup(repoId: string, groupId: string | null): Promise<void> {
+/**
+ * Adds or removes one repository's membership of one group. A repository may
+ * belong to any number of groups at once, so only the target group is touched.
+ */
+export async function setRepoGroupMembership(
+  repoId: string,
+  groupId: string,
+  member: boolean
+): Promise<void> {
   const list = await readGroups()
-  for (const g of list) {
-    g.repoIds = g.repoIds.filter((rid) => rid !== repoId)
-  }
-  if (groupId) {
-    const target = list.find((g) => g.id === groupId)
-    if (target && !target.repoIds.includes(repoId)) target.repoIds.push(repoId)
-  }
+  const target = list.find((g) => g.id === groupId)
+  if (!target) return
+  const has = target.repoIds.includes(repoId)
+  if (member && !has) target.repoIds.push(repoId)
+  if (!member && has) target.repoIds = target.repoIds.filter((rid) => rid !== repoId)
   await writeGroups(list)
 }
 

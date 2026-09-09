@@ -11,6 +11,7 @@ import type {
   CompareDetail,
   FetchOptions,
   FileDiff,
+  GroupRepoResult,
   PullOptions,
   PushOptions,
   RemoteInfo,
@@ -371,4 +372,164 @@ export async function restoreFileFromCommit(
   file: string
 ): Promise<void> {
   await gitOk(path, ['checkout', hash, '--', file])
+}
+
+async function refExists(path: string, ref: string): Promise<boolean> {
+  const res = await runGit(path, ['rev-parse', '--verify', '--quiet', ref])
+  return res.code === 0 && !!res.stdout.trim()
+}
+
+/** True when the branch exists on any remote, e.g. origin/vnext. */
+async function remoteBranchExists(path: string, name: string): Promise<boolean> {
+  const res = await runGit(path, [
+    'for-each-ref',
+    '--count=1',
+    '--format=%(refname)',
+    `refs/remotes/*/${name}`
+  ])
+  return res.code === 0 && !!res.stdout.trim()
+}
+
+/**
+ * Why `base` -> pull -> new `branch` cannot run here, or null when it can.
+ * Checked before touching any repository so a group either goes together or
+ * not at all, and re-checked per repo at run time in case something changed.
+ */
+async function branchFlowBlocker(
+  path: string,
+  base: string,
+  branch: string
+): Promise<string | null> {
+  if (!(await isGitRepo(path))) return 'Not a Git repository'
+  const st = await status(path)
+  const dirty = [...st.staged, ...st.unstaged].filter((f) => f.status !== 'untracked')
+  if (dirty.length) {
+    return `${dirty.length} uncommitted change${dirty.length === 1 ? '' : 's'} — commit or stash first`
+  }
+  if (await refExists(path, `refs/heads/${branch}`)) return `Branch "${branch}" already exists`
+  const hasLocalBase = await refExists(path, `refs/heads/${base}`)
+  const hasRemoteBase = await remoteBranchExists(path, base)
+  if (!hasLocalBase && !hasRemoteBase) return `No branch "${base}" locally or on a remote`
+  // A local base without an upstream would make the pull fail with "no tracking
+  // information"; a remote-only base gets one when checkout creates it.
+  if (hasLocalBase && !(await refExists(path, `${base}@{upstream}`))) {
+    return `"${base}" has no upstream branch to pull from`
+  }
+  return null
+}
+
+/** Dry run of createGroupBranch across a group's repositories. */
+export async function checkGroupBranch(
+  paths: string[],
+  base: string,
+  branch: string
+): Promise<GroupRepoResult[]> {
+  return Promise.all(
+    paths.map(async (path) => {
+      try {
+        const blocker = await branchFlowBlocker(path, base, branch)
+        return blocker
+          ? { path, ok: false, message: blocker }
+          : { path, ok: true, message: `Ready — will branch from "${base}"` }
+      } catch (e) {
+        return { path, ok: false, message: String((e as Error)?.message || e) }
+      }
+    })
+  )
+}
+
+/** Checks out `base`, fast-forwards it, then creates `branch` in each repository. */
+export async function createGroupBranch(
+  paths: string[],
+  base: string,
+  branch: string
+): Promise<GroupRepoResult[]> {
+  const results: GroupRepoResult[] = []
+  for (const path of paths) {
+    try {
+      const blocker = await branchFlowBlocker(path, base, branch)
+      if (blocker) throw new Error(blocker)
+      await gitOk(path, ['checkout', base])
+      await gitOk(path, ['pull', '--ff-only'])
+      await gitOk(path, ['checkout', '-b', branch])
+      results.push({ path, ok: true, message: `Created "${branch}" from "${base}"` })
+    } catch (e) {
+      results.push({ path, ok: false, message: String((e as Error)?.message || e) })
+    }
+  }
+  return results
+}
+
+/** Number of remotes that have a branch with this name (e.g. origin/vnext). */
+async function remoteBranchCount(path: string, name: string): Promise<number> {
+  const res = await runGit(path, ['for-each-ref', '--format=%(refname)', `refs/remotes/*/${name}`])
+  if (res.code !== 0) return 0
+  return res.stdout.split('\n').filter((l) => l.trim()).length
+}
+
+/**
+ * Why the existing `branch` cannot be checked out here, or null when it can.
+ * Unlike branchFlowBlocker the branch must already exist — locally, or on
+ * exactly one remote (git then creates a local tracking branch automatically).
+ */
+async function checkoutFlowBlocker(path: string, branch: string): Promise<string | null> {
+  if (!(await isGitRepo(path))) return 'Not a Git repository'
+  const st = await status(path)
+  if (st.branch === branch) return null
+  const dirty = [...st.staged, ...st.unstaged].filter((f) => f.status !== 'untracked')
+  if (dirty.length) {
+    return `${dirty.length} uncommitted change${dirty.length === 1 ? '' : 's'} — commit or stash first`
+  }
+  if (await refExists(path, `refs/heads/${branch}`)) return null
+  const remotes = await remoteBranchCount(path, branch)
+  if (remotes === 1) return null
+  if (remotes > 1) {
+    return `Branch "${branch}" exists on ${remotes} remotes — check it out manually once so git knows which to track`
+  }
+  return `No branch "${branch}" locally or on a remote`
+}
+
+/** Dry run of checkoutGroupBranch across a group's repositories. */
+export async function checkGroupCheckout(
+  paths: string[],
+  branch: string
+): Promise<GroupRepoResult[]> {
+  return Promise.all(
+    paths.map(async (path) => {
+      try {
+        const blocker = await checkoutFlowBlocker(path, branch)
+        if (blocker) return { path, ok: false, message: blocker }
+        const st = await status(path)
+        return st.branch === branch
+          ? { path, ok: true, message: `Already on "${branch}"` }
+          : { path, ok: true, message: `Ready — will check out "${branch}"` }
+      } catch (e) {
+        return { path, ok: false, message: String((e as Error)?.message || e) }
+      }
+    })
+  )
+}
+
+/** Checks out the already-existing `branch` in each repository. */
+export async function checkoutGroupBranch(
+  paths: string[],
+  branch: string
+): Promise<GroupRepoResult[]> {
+  const results: GroupRepoResult[] = []
+  for (const path of paths) {
+    try {
+      const blocker = await checkoutFlowBlocker(path, branch)
+      if (blocker) throw new Error(blocker)
+      const st = await status(path)
+      if (st.branch === branch) {
+        results.push({ path, ok: true, message: `Already on "${branch}"` })
+      } else {
+        await gitOk(path, ['checkout', branch])
+        results.push({ path, ok: true, message: `Checked out "${branch}"` })
+      }
+    } catch (e) {
+      results.push({ path, ok: false, message: String((e as Error)?.message || e) })
+    }
+  }
+  return results
 }
