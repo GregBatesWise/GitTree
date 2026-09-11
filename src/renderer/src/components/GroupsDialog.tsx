@@ -92,6 +92,7 @@ function GroupRow({
 export function GroupsDialog({ onClose }: { onClose: () => void }) {
   const repos = useStore((s) => s.repos)
   const groups = useStore((s) => s.groups)
+  const activeGroupId = useStore((s) => s.activeGroupId)
   const createGroup = useStore((s) => s.createGroup)
   const renameGroup = useStore((s) => s.renameGroup)
   const deleteGroup = useStore((s) => s.deleteGroup)
@@ -103,7 +104,14 @@ export function GroupsDialog({ onClose }: { onClose: () => void }) {
   // Which group's membership the checkboxes below edit; defaults to the first.
   const [assignGroupId, setAssignGroupId] = useState('')
 
-  const assignTarget = groups.find((g) => g.id === assignGroupId) ?? groups[0] ?? null
+  // The toolbar's active group gets priority: it is preselected and listed
+  // first in the dropdown, with the rest following their order in the list
+  // above.
+  const activeGroup = groups.find((g) => g.id === activeGroupId) ?? null
+  const assignTarget = groups.find((g) => g.id === assignGroupId) ?? activeGroup ?? groups[0] ?? null
+  const assignOptions = activeGroup
+    ? [activeGroup, ...groups.filter((g) => g.id !== activeGroup.id)]
+    : groups
 
   const addGroup = async (): Promise<void> => {
     const n = newName.trim()
@@ -178,7 +186,7 @@ export function GroupsDialog({ onClose }: { onClose: () => void }) {
                 value={assignTarget?.id ?? ''}
                 onChange={(e) => setAssignGroupId(e.target.value)}
               >
-                {groups.map((g) => (
+                {assignOptions.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.name}
                   </option>
