@@ -111,15 +111,14 @@ function CommitBox() {
   const commit = useStore((s) => s.commit)
   const busy = useStore((s) => s.busy)
 
-  // The active repo's group can define a feature id that is appended to every commit.
+  // The group selected in the toolbar filter can define a feature id that is
+  // appended to every commit. When no group is selected (All repos) — or the
+  // selected group doesn't contain this repo — no suffix is offered or applied.
   const featureSuffix = useMemo(() => {
+    if (!activeGroupId) return ''
     const repo = repos.find((r) => r.path === active)
     if (!repo) return ''
-    // A repo can be in several groups; prefer the group selected in the toolbar
-    // filter so the suffix matches the work being done, otherwise fall back to
-    // the first of the repo's groups that defines an id.
-    const mine = groups.filter((g) => g.repoIds.includes(repo.id))
-    const group = mine.find((g) => g.id === activeGroupId) ?? mine.find((g) => g.featureId?.trim())
+    const group = groups.find((g) => g.id === activeGroupId && g.repoIds.includes(repo.id))
     const id = group?.featureId?.trim()
     if (!id) return ''
     return id.startsWith('#') ? id : `#${id}`

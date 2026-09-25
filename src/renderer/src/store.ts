@@ -194,7 +194,7 @@ export interface AppState {
   rebaseOnto: (onto: string) => Promise<void>
   revertCommit: (hash: string) => Promise<void>
   resetTo: (hash: string, mode: ResetMode) => Promise<void>
-  cherryPick: (hash: string) => Promise<void>
+  cherryPick: (hash: string, mainline?: number) => Promise<void>
   restoreFileFromCommit: (hash: string, file: string) => Promise<void>
   externalDiffCommit: (hash: string, file: string) => Promise<void>
   copySha: (hash: string) => Promise<void>
@@ -1125,10 +1125,10 @@ export const useStore = create<AppState>((set, get) => {
         await get().refreshAll()
     },
 
-    cherryPick: async (hash) => {
+    cherryPick: async (hash, mainline) => {
       const p = get().activeRepoPath
       if (!p) return
-      if (await runAction('Cherry-picking', () => api.cherryPick(p, hash), 'Cherry-picked'))
+      if (await runAction('Cherry-picking', () => api.cherryPick(p, hash, mainline), 'Cherry-picked'))
         await get().refreshAll()
     },
 

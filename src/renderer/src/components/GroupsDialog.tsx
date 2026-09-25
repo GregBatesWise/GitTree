@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { Modal } from './Dialog'
-import { GroupBranchDialog } from './GroupBranchDialog'
+import { GroupBranchDialog, toBranchName } from './GroupBranchDialog'
 import type { RepoGroup } from '@shared/types'
 
 function GroupRow({
@@ -10,7 +10,8 @@ function GroupRow({
   onDelete,
   onSetFeatureId,
   onStartBranch,
-  onCopyRepos
+  onCopyRepos,
+  onCopyReviewPrompt
 }: {
   group: RepoGroup
   onRename: (id: string, name: string) => void
@@ -18,6 +19,7 @@ function GroupRow({
   onSetFeatureId: (id: string, featureId: string) => void
   onStartBranch: (group: RepoGroup) => void
   onCopyRepos: (group: RepoGroup) => void
+  onCopyReviewPrompt: (group: RepoGroup) => void
 }) {
   const [name, setName] = useState(group.name)
   const [featureId, setFeatureId] = useState(group.featureId ?? '')
@@ -77,6 +79,14 @@ function GroupRow({
         Copy repos
       </button>
       <button
+        className="btn btn-sm"
+        disabled={!group.repoIds.length}
+        title="Copy a prompt asking for a code review of this group's branch across its repositories"
+        onClick={() => onCopyReviewPrompt(group)}
+      >
+        Review prompt
+      </button>
+      <button
         className="btn btn-danger btn-sm"
         onClick={() => {
           if (confirm(`Delete group "${group.name}"? Repositories are kept, only the group is removed.`))
@@ -121,11 +131,20 @@ export function GroupsDialog({ onClose }: { onClose: () => void }) {
   }
 
   const copyGroupRepos = (group: RepoGroup): void => {
-    const names = group.repoIds
-      .map((id) => repos.find((r) => r.id === id)?.name)
-      .filter((n): n is string => !!n)
+    const names = groupRepoNames(group)
     if (names.length) void copyText(names.join(', '))
   }
+
+  const copyReviewPrompt = (group: RepoGroup): void => {
+    const names = groupRepoNames(group)
+    if (names.length)
+      void copyText(`Code review branch ${toBranchName(group.name)} across repos ${names.join(', ')}`)
+  }
+
+  const groupRepoNames = (group: RepoGroup): string[] =>
+    group.repoIds
+      .map((id) => repos.find((r) => r.id === id)?.name)
+      .filter((n): n is string => !!n)
 
   // Shown instead of the manager rather than stacked on top of it, so Escape
   // steps back one dialog at a time.
@@ -171,6 +190,7 @@ export function GroupsDialog({ onClose }: { onClose: () => void }) {
                 onSetFeatureId={setGroupFeatureId}
                 onStartBranch={setBranchGroup}
                 onCopyRepos={copyGroupRepos}
+                onCopyReviewPrompt={copyReviewPrompt}
               />
             ))}
           </div>

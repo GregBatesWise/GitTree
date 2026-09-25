@@ -159,8 +159,8 @@ const api = {
     ipcRenderer.invoke(CH.revertCommit, p, hash),
   resetTo: (p: string, hash: string, mode: ResetMode): Promise<GitResult> =>
     ipcRenderer.invoke(CH.resetTo, p, hash, mode),
-  cherryPick: (p: string, hash: string): Promise<GitResult> =>
-    ipcRenderer.invoke(CH.cherryPick, p, hash),
+  cherryPick: (p: string, hash: string, mainline?: number): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.cherryPick, p, hash, mainline),
   restoreFileFromCommit: (p: string, hash: string, file: string): Promise<GitResult> =>
     ipcRenderer.invoke(CH.restoreFileFromCommit, p, hash, file),
   externalDiffCommit: (p: string, hash: string, file: string): Promise<GitResult> =>
@@ -168,6 +168,7 @@ const api = {
   mergeTool: (p: string, file: string): Promise<GitResult> =>
     ipcRenderer.invoke(CH.mergeTool, p, file),
   copyText: (text: string): Promise<void> => ipcRenderer.invoke(CH.copyText, text),
+  refocus: (): Promise<void> => ipcRenderer.invoke(CH.appRefocus),
   onRefresh: (cb: () => void): (() => void) => {
     const listener = (): void => cb()
     ipcRenderer.on(CH.appRefresh, listener)

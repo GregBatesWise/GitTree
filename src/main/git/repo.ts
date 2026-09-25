@@ -362,8 +362,14 @@ export async function resetTo(path: string, hash: string, mode: ResetMode): Prom
   await gitOk(path, ['reset', `--${mode}`, hash])
 }
 
-export async function cherryPick(path: string, hash: string): Promise<void> {
-  await gitOk(path, ['cherry-pick', hash])
+/** `mainline` is required for merge commits: the 1-based parent to diff against. */
+export async function cherryPick(path: string, hash: string, mainline?: number): Promise<void> {
+  const args = ['cherry-pick']
+  if (mainline !== undefined) {
+    if (!Number.isInteger(mainline) || mainline < 1) throw new Error('Invalid mainline parent')
+    args.push('-m', String(mainline))
+  }
+  await gitOk(path, [...args, hash])
 }
 
 export async function restoreFileFromCommit(

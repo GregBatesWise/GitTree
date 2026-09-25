@@ -326,8 +326,8 @@ export function registerIpc(): void {
   ipcMain.handle(CH.resetTo, (_e, p: string, hash: string, mode: ResetMode) =>
     wrap(() => repo.resetTo(p, hash, mode))
   )
-  ipcMain.handle(CH.cherryPick, (_e, p: string, hash: string) =>
-    wrap(() => repo.cherryPick(p, hash))
+  ipcMain.handle(CH.cherryPick, (_e, p: string, hash: string, mainline?: number) =>
+    wrap(() => repo.cherryPick(p, hash, mainline))
   )
   ipcMain.handle(CH.restoreFileFromCommit, (_e, p: string, hash: string, file: string) =>
     wrap(() => repo.restoreFileFromCommit(p, hash, file))
@@ -338,5 +338,15 @@ export function registerIpc(): void {
   ipcMain.handle(CH.mergeTool, (_e, p: string, file: string) => wrap(() => openMergeTool(p, file)))
   ipcMain.handle(CH.copyText, (_e, text: string) => {
     clipboard.writeText(text)
+  })
+  // Windows leaves the page without keyboard input after a native confirm()/alert()
+  // (paste still works, typing doesn't) until the window is re-focused.
+  ipcMain.handle(CH.appRefocus, (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (win && !win.isDestroyed()) {
+      win.blur()
+      win.focus()
+    }
+    e.sender.focus()
   })
 }

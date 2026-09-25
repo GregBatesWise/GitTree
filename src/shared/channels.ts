@@ -69,7 +69,8 @@ export const CH = {
   mergeTool: 'git:mergeTool',
   copyText: 'clipboard:writeText',
   applyPatch: 'git:applyPatch',
-  appRefresh: 'app:refresh'
+  appRefresh: 'app:refresh',
+  appRefocus: 'app:refocus'
 } as const
 
 export type ChannelName = (typeof CH)[keyof typeof CH]

@@ -313,7 +313,18 @@ export function HistoryView() {
       {
         label: 'Cherry Pick',
         onClick: () => {
-          if (confirm(`Cherry-pick ${short} onto the current branch?`)) cherryPick(hash)
+          const isMerge = (commits.find((c) => c.hash === hash)?.parents.length ?? 0) > 1
+          if (!isMerge) {
+            if (confirm(`Cherry-pick ${short} onto the current branch?`)) cherryPick(hash)
+            return
+          }
+          // Parent 1 is the branch that was merged into, so this applies the merged-in changes.
+          if (
+            confirm(
+              `${short} is a merge commit. Cherry-pick the changes it brought in (relative to its first parent) onto the current branch?`
+            )
+          )
+            cherryPick(hash, 1)
         }
       },
       {
