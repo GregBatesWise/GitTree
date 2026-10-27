@@ -14,7 +14,22 @@ const MAX_BUFFER = 64 * 1024 * 1024
  * Resolves regardless of exit code so callers can inspect output; use gitOk for
  * commands where a non-zero exit should throw.
  */
-export function runGit(cwd: string, args: string[]): Promise<RunResult> {
+export async function runGit(cwd: string, args: string[]): Promise<RunResult> {
+  let res = await runOnce(cwd, args)
+  // Another git process (a background refresh, an IDE) briefly holding a lock
+  // makes git bail before touching anything, so replaying the command is safe.
+  for (const delay of LOCK_RETRY_DELAYS) {
+    if (res.code === 0 || !LOCK_ERROR.test(res.stderr)) break
+    await new Promise((r) => setTimeout(r, delay))
+    res = await runOnce(cwd, args)
+  }
+  return res
+}
+
+const LOCK_ERROR = /Unable to create '[^']*\.lock': File exists/i
+const LOCK_RETRY_DELAYS = [150, 300, 600, 1200, 2000]
+
+function runOnce(cwd: string, args: string[]): Promise<RunResult> {
   return new Promise((resolve) => {
     execFile(
       'git',

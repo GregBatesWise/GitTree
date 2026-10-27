@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from
 import { activeLineSelection, useStore } from '../store'
 import { DiffViewer } from './DiffViewer'
 import { ContextMenu, type MenuItem } from './ContextMenu'
+import { ConfirmDialog } from './Dialog'
 import { useResizable } from '../lib/useResizable'
 import { claimsKey, nextRowIndex } from '../lib/keys'
 import type { FileChange } from '@shared/types'
@@ -207,6 +208,7 @@ export function WorkingCopy() {
   const stageAll = useStore((s) => s.stageAll)
   const unstageAll = useStore((s) => s.unstageAll)
   const resolveInMergeTool = useStore((s) => s.resolveInMergeTool)
+  const resolveConflict = useStore((s) => s.resolveConflict)
   const openFile = useStore((s) => s.openFile)
   const active = useStore((s) => s.activeRepoPath)
   const { size: leftWidth, onResizeStart } = useResizable('wcLeftWidth', 460, 280, 1000)
@@ -227,7 +229,9 @@ export function WorkingCopy() {
     y: number
     path: string
     deleted: boolean
+    conflicted: boolean
   } | null>(null)
+  const [discarding, setDiscarding] = useState<string[] | null>(null)
 
   // Space stages the selected unstaged file(s) (or unstages the selected staged
   // file). Staging a single file auto-advances to the next one in the store.
@@ -365,12 +369,7 @@ export function WorkingCopy() {
     setSelection(null)
   }
   const doDiscard = (path: string): void => {
-    const t = targets('unstaged', path)
-    const label = t.length > 1 ? `${t.length} files` : `"${t[0]}"`
-    if (confirm(`Discard changes to ${label}? This cannot be undone.`)) {
-      discard(t)
-      setSelection(null)
-    }
+    setDiscarding(targets('unstaged', path))
   }
 
   const stageSelected = (): void => {
@@ -385,19 +384,29 @@ export function WorkingCopy() {
   }
   const discardSelected = (): void => {
     if (!selection || selection.side !== 'unstaged') return
-    const t = selection.paths.filter((p) => unstagedPaths.includes(p))
-    if (confirm(`Discard changes to ${t.length} files? This cannot be undone.`)) {
-      discard(t)
-      setSelection(null)
-    }
+    setDiscarding(selection.paths.filter((p) => unstagedPaths.includes(p)))
   }
 
   const openMenu = (e: ReactMouseEvent, file: FileChange): void => {
     e.preventDefault()
-    setMenu({ x: e.clientX, y: e.clientY, path: file.path, deleted: file.status === 'deleted' })
+    setMenu({
+      x: e.clientX,
+      y: e.clientY,
+      path: file.path,
+      deleted: file.status === 'deleted',
+      conflicted: file.status === 'conflicted'
+    })
   }
 
-  const fileMenu = (path: string, deleted: boolean): MenuItem[] => [
+  const fileMenu = (path: string, deleted: boolean, conflicted: boolean): MenuItem[] => [
+    ...(conflicted
+      ? [
+          { label: 'Accept incoming (theirs)', onClick: () => resolveConflict(path, 'theirs') },
+          { label: 'Keep current (ours)', onClick: () => resolveConflict(path, 'ours') },
+          { label: 'Resolve in merge tool', onClick: () => resolveInMergeTool(path) },
+          { separator: true }
+        ]
+      : []),
     {
       label: 'Open',
       disabled: deleted,
@@ -499,8 +508,22 @@ export function WorkingCopy() {
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={fileMenu(menu.path, menu.deleted)}
+          items={fileMenu(menu.path, menu.deleted, menu.conflicted)}
           onClose={() => setMenu(null)}
+        />
+      )}
+      {discarding && (
+        <ConfirmDialog
+          title="Discard changes"
+          message={`Discard changes to ${
+            discarding.length > 1 ? `${discarding.length} files` : `"${discarding[0]}"`
+          }? This cannot be undone.`}
+          confirmLabel="Discard"
+          onConfirm={() => {
+            discard(discarding)
+            setSelection(null)
+          }}
+          onClose={() => setDiscarding(null)}
         />
       )}
     </div>

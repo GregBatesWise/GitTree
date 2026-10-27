@@ -16,6 +16,25 @@ export function relativeTime(iso: string): string {
   return `${yr} year${yr === 1 ? '' : 's'} ago`
 }
 
+// Built once: every toLocale*String call with options constructs a fresh
+// Intl.DateTimeFormat, which adds up across hundreds of history rows.
+const TIME_FMT = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' })
+const DAY_MONTH_FMT = new Intl.DateTimeFormat(undefined, { day: '2-digit', month: 'short' })
+const DAY_MONTH_YEAR_FMT = new Intl.DateTimeFormat(undefined, {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric'
+})
+// The same fields Date.prototype.toLocaleString() shows by default.
+const FULL_FMT = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: 'numeric',
+  second: 'numeric'
+})
+
 /**
  * Compact absolute date and time for the history list, e.g. "31 Jul 2026 14:32".
  * Today's commits drop the date, since "14:32" is the useful part when several
@@ -24,25 +43,21 @@ export function relativeTime(iso: string): string {
 export function shortDateTime(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  const time = TIME_FMT.format(d)
   const now = new Date()
   const sameDay =
     d.getDate() === now.getDate() &&
     d.getMonth() === now.getMonth() &&
     d.getFullYear() === now.getFullYear()
   if (sameDay) return time
-  const date = d.toLocaleDateString(undefined, {
-    day: '2-digit',
-    month: 'short',
-    year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric'
-  })
+  const date = (d.getFullYear() === now.getFullYear() ? DAY_MONTH_FMT : DAY_MONTH_YEAR_FMT).format(d)
   return `${date} ${time}`
 }
 
 export function fullDate(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString()
+  return FULL_FMT.format(d)
 }
 
 export function initials(name: string): string {

@@ -108,6 +108,7 @@ export function RepoPicker() {
   const reorderRepos = useStore((s) => s.reorderRepos)
 
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const [removing, setRemoving] = useState<RepoBookmark | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -116,7 +117,20 @@ export function RepoPicker() {
   // With a group selected in the toolbar filter the menu lists only its
   // members; with All repos it is one flat, ungrouped list.
   const activeGroup = groups.find((g) => g.id === activeGroupId) ?? null
-  const visible = activeGroup ? repos.filter((r) => activeGroup.repoIds.includes(r.id)) : repos
+  const inGroup = activeGroup ? repos.filter((r) => activeGroup.repoIds.includes(r.id)) : repos
+  const q = query.trim().toLowerCase()
+  const visible = q
+    ? inGroup.filter((r) => r.name.toLowerCase().includes(q) || r.path.toLowerCase().includes(q))
+    : inGroup
+
+  useEffect(() => {
+    if (!open) setQuery('')
+  }, [open])
+
+  const pick = (repo: RepoBookmark): void => {
+    setOpen(false)
+    if (repo.path !== active) selectRepo(repo.path)
+  }
 
   useEffect(() => {
     if (!open) return
@@ -165,10 +179,7 @@ export function RepoPicker() {
       repo={repo}
       current={repo.path === active}
       dragging={dragId === repo.id}
-      onSelect={() => {
-        setOpen(false)
-        if (repo.path !== active) selectRepo(repo.path)
-      }}
+      onSelect={() => pick(repo)}
       onRemove={() => setRemoving(repo)}
       onDragStart={() => setDragId(repo.id)}
       onDragEnd={() => setDragId(null)}
@@ -189,12 +200,27 @@ export function RepoPicker() {
 
       {open && (
         <div className="repo-menu">
+          {inGroup.length > 1 && (
+            <div className="repo-search-wrap">
+              <input
+                className="repo-search"
+                placeholder="Search repositories…"
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && visible.length) pick(visible[0])
+                }}
+              />
+            </div>
+          )}
           {!repos.length && <div className="side-empty">No repositories yet</div>}
-          {!!activeGroup && !visible.length && (
+          {!!activeGroup && !inGroup.length && (
             <div className="side-empty">No repositories in this group</div>
           )}
+          {!!q && !visible.length && <div className="side-empty">No matching repositories</div>}
           {visible.map(row)}
-          {repos.length > 1 && <div className="repo-menu-hint">Drag a row to reorder</div>}
+          {repos.length > 1 && !q && <div className="repo-menu-hint">Drag a row to reorder</div>}
         </div>
       )}
 

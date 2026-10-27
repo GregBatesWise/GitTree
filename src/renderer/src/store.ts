@@ -1,5 +1,12 @@
 import { create } from 'zustand'
 import { buildLinePatch } from './lib/patch'
+import {
+  dropCachedRepo,
+  getCachedRepo,
+  loadPersistedRepo,
+  putCachedRepo,
+  type RepoCacheEntry
+} from './lib/repoCache'
 import type {
   BranchInfo,
   CommitDetail,
@@ -13,6 +20,7 @@ import type {
   RemoteInfo,
   RepoBookmark,
   RepoGroup,
+  RepoSnapshot,
   ResetMode,
   StashDetail,
   StashInfo,
@@ -66,11 +74,15 @@ export interface AppState {
   stashes: StashInfo[]
   remotes: RemoteInfo[]
   tags: TagInfo[]
+  /** Tag names on the default remote; null = not known (no remote, offline, or not loaded yet). */
+  remoteTags: string[] | null
   submodules: SubmoduleInfo[]
 
   historyBranch: string
   historyBranchAuto: boolean
   historyQuery: string
+  /** Git-side matches for historyQuery across full history; null = not searched yet. */
+  searchResults: CommitInfo[] | null
 
   selectedCommit: string | null
   commitDetail: CommitDetail | null
@@ -176,9 +188,12 @@ export interface AppState {
   addRemote: (name: string, url: string) => Promise<boolean>
   removeRemote: (name: string) => Promise<void>
 
-  createTag: (name: string, message: string) => Promise<boolean>
+  createTag: (name: string, message: string, ref?: string) => Promise<boolean>
   deleteTag: (name: string) => Promise<void>
   pushTag: (name: string) => Promise<void>
+  /** Reads which tags exist on the default remote (a network call). With
+   *  `ifStale`, skips the call when a recent answer is already on screen. */
+  loadRemoteTags: (opts?: { ifStale?: boolean }) => Promise<void>
 
   updateSubmodules: () => Promise<void>
   updateSubmodule: (path: string) => Promise<void>
@@ -188,6 +203,7 @@ export interface AppState {
   /** Opens a working-copy file in the external editor (Notepad++ on Windows). */
   openFile: (file: string) => Promise<void>
   resolveInMergeTool: (file: string) => Promise<void>
+  resolveConflict: (file: string, side: 'ours' | 'theirs') => Promise<void>
 
   setHistoryBranch: (ref: string) => Promise<void>
   setHistoryQuery: (query: string) => void
@@ -216,7 +232,88 @@ export function activeLineSelection(
   return ls
 }
 
+// Bumped by every status fetch; a fetch only publishes if it is still the latest,
+// so a slow refreshAll can't overwrite a newer post-staging status.
+let statusSeq = 0
+
+let searchSeq = 0
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+
+/** How long a remote-tags answer is trusted before switching back re-asks the remote. */
+const REMOTE_TAGS_TTL_MS = 5 * 60_000
+
+/**
+ * Returns `prev` when `next` holds the same data, so a refresh that changed
+ * nothing keeps every reference stable and React skips re-rendering (the
+ * history table alone is hundreds of rows of SVG).
+ */
+function keep<T>(prev: T, next: T): T {
+  if (prev === next) return prev
+  return JSON.stringify(prev) === JSON.stringify(next) ? prev : next
+}
+
+// Paint the repository from the last session straight away on startup.
+loadPersistedRepo()
+
 export const useStore = create<AppState>((set, get) => {
+  /**
+   * Records the active repository's on-screen data in the repo cache so the
+   * next visit can paint it instantly. Only the auto-followed history is kept,
+   * because selectRepo always restores the filter to the checked-out branch.
+   */
+  function remember(p: string, extra?: Partial<RepoCacheEntry>): void {
+    const s = get()
+    if (s.activeRepoPath !== p) return
+    const prev = getCachedRepo(p)
+    putCachedRepo(p, {
+      status: s.status,
+      historyBranch: s.historyBranchAuto ? s.historyBranch : (prev?.historyBranch ?? ''),
+      commits: s.historyBranchAuto ? s.commits : (prev?.commits ?? []),
+      branches: s.branches,
+      stashes: s.stashes,
+      remotes: s.remotes,
+      tags: s.tags,
+      submodules: s.submodules,
+      remoteTags: s.remoteTags,
+      remoteTagsAt: prev?.remoteTagsAt ?? 0,
+      ...extra
+    })
+  }
+
+  /**
+   * Re-loads an open working-copy diff so it reflects the latest status. A line
+   * selection indexes into the diff, so it is dropped unless the diff is
+   * unchanged (e.g. a window-focus refresh where nothing was touched).
+   */
+  async function reloadOpenDiff(p: string): Promise<void> {
+    const sel = get().selectedFile
+    if (!sel || sel.kind !== 'working') return
+    const st = get().status
+    const all = [...(st?.staged ?? []), ...(st?.unstaged ?? [])]
+    if (!all.some((f) => f.path === sel.path && f.staged === sel.staged)) {
+      set({ selectedFile: null, diff: null, lineSelection: null })
+      return
+    }
+    const d = await api.diffWorking(p, sel.path, sel.staged, sel.untracked)
+    // The user may have moved on to another file or repository meanwhile.
+    if (get().activeRepoPath !== p || get().selectedFile !== sel) return
+    const prev = get().diff
+    const diff = keep(prev, d.ok ? (d.data as FileDiff) : null)
+    if (diff !== prev) set({ diff, lineSelection: null })
+  }
+
+  async function runSearch(): Promise<void> {
+    const seq = ++searchSeq
+    const p = get().activeRepoPath
+    const q = get().historyQuery.trim()
+    if (!p || !q) {
+      set({ searchResults: null })
+      return
+    }
+    const res = await api.searchLog(p, q)
+    if (seq !== searchSeq || get().activeRepoPath !== p) return
+    set({ searchResults: res.ok ? (res.data as CommitInfo[]) : null })
+  }
   /** Resolves the current line selection into everything buildLinePatch needs. */
   function lineTarget(): {
     path: string
@@ -271,10 +368,12 @@ export const useStore = create<AppState>((set, get) => {
     stashes: [],
     remotes: [],
     tags: [],
+    remoteTags: null,
     submodules: [],
     historyBranch: '',
     historyBranchAuto: true,
     historyQuery: '',
+    searchResults: null,
     selectedCommit: null,
     commitDetail: null,
     compareCommit: null,
@@ -293,9 +392,11 @@ export const useStore = create<AppState>((set, get) => {
     toast: null,
 
     init: async () => {
-      const repos = await api.listRepos()
-      const groups = await api.listGroups()
-      const settings = await api.getSettings()
+      const [repos, groups, settings] = await Promise.all([
+        api.listRepos(),
+        api.listGroups(),
+        api.getSettings()
+      ])
       // Restore the group filter, dropping a stale id left by a deleted group.
       const activeGroupId = groups.some((g) => g.id === settings.lastGroupId)
         ? (settings.lastGroupId as string)
@@ -314,6 +415,9 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     selectRepo: async (path) => {
+      // A repository seen before paints from the cache straight away; the
+      // refresh below then replaces it with live data.
+      const cached = getCachedRepo(path)
       set({
         activeRepoPath: path,
         // An action still running against the previous repo must not leave the
@@ -327,21 +431,24 @@ export const useStore = create<AppState>((set, get) => {
         stashDetail: null,
         selectedFile: null,
         diff: null,
-        status: null,
-        commits: [],
-        branches: [],
-        stashes: [],
-        remotes: [],
-        tags: [],
-        submodules: [],
-        historyBranch: '',
+        status: cached?.status ?? null,
+        commits: cached?.commits ?? [],
+        branches: cached?.branches ?? [],
+        stashes: cached?.stashes ?? [],
+        remotes: cached?.remotes ?? [],
+        tags: cached?.tags ?? [],
+        remoteTags: cached?.remoteTags ?? null,
+        submodules: cached?.submodules ?? [],
+        historyBranch: cached?.historyBranch ?? '',
         historyBranchAuto: true,
-        historyQuery: ''
+        historyQuery: '',
+        searchResults: null
       })
       // The group filter (lastGroupId) is owned by setActiveGroup, not by repo
       // selection — picking a repo no longer changes which group is filtered in.
-      await api.setSettings({ lastRepoPath: path })
+      void api.setSettings({ lastRepoPath: path })
       await get().refreshAll()
+      void get().loadRemoteTags({ ifStale: true })
     },
 
     addRepoViaDialog: async () => {
@@ -363,7 +470,10 @@ export const useStore = create<AppState>((set, get) => {
       const removed = get().repos.find((r) => r.id === id)
       const wasActive = removed && removed.path === get().activeRepoPath
       const drafts = { ...get().commitDrafts }
-      if (removed) delete drafts[removed.path]
+      if (removed) {
+        delete drafts[removed.path]
+        dropCachedRepo(removed.path)
+      }
       set({ repos, commitDrafts: drafts })
       await get().loadGroups()
       if (wasActive) {
@@ -381,10 +491,12 @@ export const useStore = create<AppState>((set, get) => {
             stashes: [],
             remotes: [],
             tags: [],
+            remoteTags: null,
             submodules: [],
             historyBranch: '',
             historyBranchAuto: true,
             historyQuery: '',
+            searchResults: null,
             selectedCommit: null,
             commitDetail: null,
             compareCommit: null,
@@ -541,50 +653,51 @@ export const useStore = create<AppState>((set, get) => {
       const p = get().activeRepoPath
       if (!p) return
       set({ loading: true })
-      // Load status first so the history filter can default to the current branch.
-      const st = await api.status(p)
-      const branch = st.ok ? (st.data as StatusResult).branch : null
-      if (get().historyBranchAuto && branch && get().historyBranch !== branch) {
-        set({ historyBranch: branch })
-      }
-      const ref = get().historyBranch || undefined
-      const [lg, br, sh, rm, tg, sm] = await Promise.all([
-        api.log(p, 500, ref),
-        api.branches(p),
-        api.stashes(p),
-        api.remotes(p),
-        api.tags(p),
-        api.submodules(p)
-      ])
-      const firstErr = [st, lg, br, sh, rm, tg, sm].find((r) => !r.ok)
-      // The user can switch repo while these are in flight; publishing then
+      const seq = ++statusSeq
+      const reqAuto = get().historyBranchAuto
+      const reqBranch = get().historyBranch
+      // Submodule status can take seconds, so it lands on its own rather than
+      // holding up everything else.
+      void api.submodules(p).then((sm) => {
+        if (get().activeRepoPath !== p) return
+        set({
+          submodules: keep(get().submodules, sm.ok ? (sm.data as SubmoduleInfo[]) : []),
+          ...(sm.ok || get().error ? {} : { error: sm.error || 'Failed to load submodules' })
+        })
+        remember(p)
+      })
+      // With auto on, main resolves the checked-out branch itself, so the log
+      // no longer has to wait for `git status` to finish first.
+      const res = await api.snapshot(p, reqBranch || undefined, reqAuto)
+      // The user can switch repo while this is in flight; publishing then
       // would overwrite the new repo's state with this one's.
       if (get().activeRepoPath !== p) return
-      set({
-        status: st.ok ? (st.data as StatusResult) : null,
-        commits: lg.ok ? (lg.data as CommitInfo[]) : [],
-        branches: br.ok ? (br.data as BranchInfo[]) : [],
-        stashes: sh.ok ? (sh.data as StashInfo[]) : [],
-        remotes: rm.ok ? (rm.data as RemoteInfo[]) : [],
-        tags: tg.ok ? (tg.data as TagInfo[]) : [],
-        submodules: sm.ok ? (sm.data as SubmoduleInfo[]) : [],
-        loading: false,
-        error: firstErr ? firstErr.error || 'Failed to load repository' : get().error
-      })
-
-      // Re-load an open working-copy diff so it reflects the new status. Any
-      // line selection is dropped: it indexes into the diff we just replaced.
-      const sel = get().selectedFile
-      if (sel && sel.kind === 'working') {
-        const all = [...(get().status?.staged ?? []), ...(get().status?.unstaged ?? [])]
-        const match = all.find((f) => f.path === sel.path && f.staged === sel.staged)
-        if (match) {
-          const d = await api.diffWorking(p, sel.path, sel.staged, sel.untracked)
-          set({ diff: d.ok ? (d.data as FileDiff) : null, lineSelection: null })
-        } else {
-          set({ selectedFile: null, diff: null, lineSelection: null })
-        }
+      const fresh = seq === statusSeq
+      const s = get()
+      if (!res.ok || !res.data) {
+        set({ loading: false, error: res.error || 'Failed to load repository' })
+        return
       }
+      const snap = res.data as RepoSnapshot
+      // An explicit branch picked while this was running already loaded its own history.
+      const historyCurrent =
+        s.historyBranchAuto === reqAuto && (reqAuto || s.historyBranch === reqBranch)
+      set({
+        ...(fresh ? { status: keep(s.status, snap.status) } : {}),
+        ...(historyCurrent
+          ? { historyBranch: snap.historyBranch, commits: keep(s.commits, snap.commits) }
+          : {}),
+        branches: keep(s.branches, snap.branches),
+        stashes: keep(s.stashes, snap.stashes),
+        remotes: keep(s.remotes, snap.remotes),
+        tags: keep(s.tags, snap.tags),
+        loading: false,
+        error: snap.error ?? s.error
+      })
+      remember(p)
+      if (get().historyQuery.trim()) void runSearch()
+      if (!fresh) return
+      await reloadOpenDiff(p)
     },
 
     // Lightweight refresh for staging operations: only the working-tree status
@@ -593,27 +706,16 @@ export const useStore = create<AppState>((set, get) => {
     refreshStatus: async () => {
       const p = get().activeRepoPath
       if (!p) return
+      const seq = ++statusSeq
       const st = await api.status(p)
-      if (get().activeRepoPath !== p) return
+      if (get().activeRepoPath !== p || seq !== statusSeq) return
       if (!st.ok) {
         set({ error: st.error || 'Failed to load status' })
         return
       }
-      set({ status: st.data as StatusResult })
-
-      // Re-load an open working-copy diff so it reflects the new status. Any
-      // line selection is dropped: it indexes into the diff we just replaced.
-      const sel = get().selectedFile
-      if (sel && sel.kind === 'working') {
-        const all = [...(get().status?.staged ?? []), ...(get().status?.unstaged ?? [])]
-        const match = all.find((f) => f.path === sel.path && f.staged === sel.staged)
-        if (match) {
-          const d = await api.diffWorking(p, sel.path, sel.staged, sel.untracked)
-          set({ diff: d.ok ? (d.data as FileDiff) : null, lineSelection: null })
-        } else {
-          set({ selectedFile: null, diff: null, lineSelection: null })
-        }
-      }
+      set({ status: keep(get().status, st.data as StatusResult) })
+      remember(p)
+      await reloadOpenDiff(p)
     },
 
     setView: (view) =>
@@ -908,20 +1010,28 @@ export const useStore = create<AppState>((set, get) => {
         setUpstream && st?.branch
           ? { setUpstream: true, remote: 'origin', branch: st.branch }
           : {}
-      if (await runAction('Pushing', () => api.push(p, opts), 'Pushed')) await get().refreshAll()
+      if (await runAction('Pushing', () => api.push(p, opts), 'Pushed')) {
+        await get().refreshAll()
+        void get().loadRemoteTags()
+      }
     },
 
     pull: async () => {
       const p = get().activeRepoPath
       if (!p) return
-      if (await runAction('Pulling', () => api.pull(p, {}), 'Pulled')) await get().refreshAll()
+      if (await runAction('Pulling', () => api.pull(p, {}), 'Pulled')) {
+        await get().refreshAll()
+        void get().loadRemoteTags()
+      }
     },
 
     fetch: async () => {
       const p = get().activeRepoPath
       if (!p) return
-      if (await runAction('Fetching', () => api.fetch(p, { prune: true }), 'Fetched'))
+      if (await runAction('Fetching', () => api.fetch(p, { prune: true }), 'Fetched')) {
         await get().refreshAll()
+        void get().loadRemoteTags()
+      }
     },
 
     checkoutBranch: async (name) => {
@@ -1015,11 +1125,11 @@ export const useStore = create<AppState>((set, get) => {
         await get().refreshAll()
     },
 
-    createTag: async (name, message) => {
+    createTag: async (name, message, ref) => {
       const p = get().activeRepoPath
       if (!p) return false
       const ok = await runAction('Creating tag', () =>
-        api.createTag(p, name, undefined, message || undefined)
+        api.createTag(p, name, ref, message || undefined)
       )
       if (ok) await get().refreshAll()
       return ok
@@ -1041,7 +1151,37 @@ export const useStore = create<AppState>((set, get) => {
         set({ error: 'No remote configured to push the tag to' })
         return
       }
-      await runAction(`Pushing tag ${name}`, () => api.pushTag(p, remote, name), `Pushed ${name}`)
+      if (
+        await runAction(`Pushing tag ${name}`, () => api.pushTag(p, remote, name), `Pushed ${name}`)
+      ) {
+        const known = get().remoteTags
+        if (get().activeRepoPath !== p) return
+        if (known) {
+          if (!known.includes(name)) {
+            set({ remoteTags: [...known, name] })
+            remember(p)
+          }
+        } else void get().loadRemoteTags()
+      }
+    },
+
+    loadRemoteTags: async (opts) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      const remotes = get().remotes
+      const remote = remotes.find((r) => r.name === 'origin')?.name ?? remotes[0]?.name
+      if (!remote) {
+        set({ remoteTags: null })
+        remember(p, { remoteTagsAt: 0 })
+        return
+      }
+      const at = getCachedRepo(p)?.remoteTagsAt ?? 0
+      if (opts?.ifStale && get().remoteTags && Date.now() - at < REMOTE_TAGS_TTL_MS) return
+      // Silent on failure: the badge just stays unknown rather than raising an error.
+      const res = await api.remoteTags(p, remote)
+      if (get().activeRepoPath !== p) return
+      set({ remoteTags: res.ok ? keep(get().remoteTags, res.data as string[]) : null })
+      remember(p, { remoteTagsAt: res.ok ? Date.now() : 0 })
     },
 
     updateSubmodules: async () => {
@@ -1088,6 +1228,16 @@ export const useStore = create<AppState>((set, get) => {
       )
     },
 
+    resolveConflict: async (file, side) => {
+      const p = get().activeRepoPath
+      if (!p) return
+      const label = side === 'theirs' ? 'Accepting incoming' : 'Keeping current'
+      if (await runAction(label, () => api.resolveConflict(p, file, side), `Resolved ${file}`)) {
+        set({ selectedFile: null, diff: null })
+        await get().refreshStatus()
+      }
+    },
+
     setHistoryBranch: async (ref) => {
       // An explicit choice stops the filter from auto-tracking the current branch.
       set({ historyBranch: ref, historyBranchAuto: false })
@@ -1102,7 +1252,16 @@ export const useStore = create<AppState>((set, get) => {
       })
     },
 
-    setHistoryQuery: (query) => set({ historyQuery: query }),
+    setHistoryQuery: (query) => {
+      set({ historyQuery: query })
+      clearTimeout(searchTimer)
+      if (!query.trim()) {
+        ++searchSeq
+        set({ searchResults: null })
+        return
+      }
+      searchTimer = setTimeout(() => void runSearch(), 250)
+    },
 
     rebaseOnto: async (onto) => {
       const p = get().activeRepoPath
@@ -1128,8 +1287,9 @@ export const useStore = create<AppState>((set, get) => {
     cherryPick: async (hash, mainline) => {
       const p = get().activeRepoPath
       if (!p) return
-      if (await runAction('Cherry-picking', () => api.cherryPick(p, hash, mainline), 'Cherry-picked'))
-        await get().refreshAll()
+      await runAction('Cherry-picking', () => api.cherryPick(p, hash, mainline), 'Cherry-picked')
+      // Refresh on failure too, so conflicted files from a stopped cherry-pick show up.
+      await get().refreshAll()
     },
 
     restoreFileFromCommit: async (hash, file) => {

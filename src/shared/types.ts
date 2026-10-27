@@ -73,6 +73,20 @@ export interface StatusResult {
   unstaged: FileChange[]
 }
 
+/** Everything a full repository refresh shows (bar submodules, loaded separately). */
+export interface RepoSnapshot {
+  status: StatusResult | null
+  /** The ref `commits` was read for; '' means all branches. */
+  historyBranch: string
+  commits: CommitInfo[]
+  branches: BranchInfo[]
+  stashes: StashInfo[]
+  remotes: RemoteInfo[]
+  tags: TagInfo[]
+  /** First failure among the parts, which then fall back to empty. */
+  error: string | null
+}
+
 export interface BranchInfo {
   name: string
   current: boolean

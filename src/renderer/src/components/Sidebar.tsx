@@ -129,6 +129,7 @@ export function Sidebar({ width }: { width?: number }) {
   const stashes = useStore((s) => s.stashes)
   const remotes = useStore((s) => s.remotes)
   const tags = useStore((s) => s.tags)
+  const remoteTags = useStore((s) => s.remoteTags)
   const submodules = useStore((s) => s.submodules)
   const active = useStore((s) => s.activeRepoPath)
   const checkout = useStore((s) => s.checkoutBranch)
@@ -143,6 +144,7 @@ export function Sidebar({ width }: { width?: number }) {
   const updateSubmodule = useStore((s) => s.updateSubmodule)
 
   const [remoteDlg, setRemoteDlg] = useState(false)
+  const tagRemote = remotes.find((r) => r.name === 'origin')?.name ?? remotes[0]?.name
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({
     remotes: true,
     tags: true,
@@ -155,6 +157,7 @@ export function Sidebar({ width }: { width?: number }) {
     y: number
     branch: BranchInfo
   } | null>(null)
+  const [tagMenu, setTagMenu] = useState<{ x: number; y: number; name: string } | null>(null)
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<BranchInfo | null>(null)
   const [dropStash, setDropStash] = useState<StashInfo | null>(null)
@@ -322,9 +325,22 @@ export function Sidebar({ width }: { width?: number }) {
                   (t.subject ? `\n${t.subject}` : '')
                 }
                 onClick={() => checkout(t.name)}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  setTagMenu({ x: e.clientX, y: e.clientY, name: t.name })
+                }}
               >
                 <span className="ico">🏷</span>
                 <span className="label">{t.name}</span>
+                {remotes.length === 0 || (remoteTags && !remoteTags.includes(t.name)) ? (
+                  <span className="tag-where local" title="Only in this local repository">
+                    local
+                  </span>
+                ) : remoteTags ? (
+                  <span className="tag-where remote" title={`Also on ${tagRemote}`}>
+                    {tagRemote}
+                  </span>
+                ) : null}
                 <span className="hover-actions" onClick={(e) => e.stopPropagation()}>
                   {remotes.length > 0 && (
                     <button className="mini-btn" title="Push tag to remote" onClick={() => pushTag(t.name)}>
@@ -399,14 +415,18 @@ export function Sidebar({ width }: { width?: number }) {
             {stashes.map((s) => (
               <div
                 key={s.ref}
-                className={'side-item' + (selectedStash?.ref === s.ref ? ' active' : '')}
+                className={'side-item stash-item' + (selectedStash?.ref === s.ref ? ' active' : '')}
                 title={s.message + '\nClick to preview — double-click to apply (keep stash)'}
                 onClick={() => selectStash(s)}
                 onDoubleClick={() => stashApply(s.ref, false)}
               >
                 <span className="ico">⚑</span>
                 <span className="label">{s.name}</span>
-                {s.branch && <span className="stash-branch">{s.branch}</span>}
+                {s.branch && (
+                  <span className="stash-branch" title={s.branch}>
+                    {s.branch}
+                  </span>
+                )}
                 <span className="hover-actions" onClick={(e) => e.stopPropagation()}>
                   <button className="mini-btn" title="Apply and drop" onClick={() => stashApply(s.ref, true)}>
                     Pop
@@ -432,6 +452,14 @@ export function Sidebar({ width }: { width?: number }) {
           y={branchMenu.y}
           items={buildBranchMenu(branchMenu.branch)}
           onClose={() => setBranchMenu(null)}
+        />
+      )}
+      {tagMenu && (
+        <ContextMenu
+          x={tagMenu.x}
+          y={tagMenu.y}
+          items={[{ label: 'Copy Tag Name', onClick: () => copyText(tagMenu.name) }]}
+          onClose={() => setTagMenu(null)}
         />
       )}
       {renameTarget && (

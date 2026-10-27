@@ -31,3 +31,47 @@ export function Modal({ title, onClose, children, footer }: ModalProps) {
     </div>
   )
 }
+
+/**
+ * In-app stand-in for window.confirm(). The native dialog makes the window lose
+ * and regain focus on close, which flashes whatever app is underneath.
+ */
+export function ConfirmDialog({
+  title,
+  message,
+  confirmLabel,
+  onConfirm,
+  onClose
+}: {
+  title: string
+  message: ReactNode
+  confirmLabel: string
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  return (
+    <Modal
+      title={title}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-danger"
+            autoFocus
+            onClick={() => {
+              onClose()
+              onConfirm()
+            }}
+          >
+            {confirmLabel}
+          </button>
+        </>
+      }
+    >
+      <p className="modal-note">{message}</p>
+    </Modal>
+  )
+}

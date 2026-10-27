@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, isAbsolute } from 'node:path'
+import { dirname, join, isAbsolute, resolve } from 'node:path'
 import { runGit, gitOk } from './run'
 import * as P from './parsers'
 import type {
@@ -15,6 +15,7 @@ import type {
   PullOptions,
   PushOptions,
   RemoteInfo,
+  RepoSnapshot,
   ResetMode,
   StashDetail,
   StashInfo,
@@ -46,7 +47,220 @@ export async function status(path: string): Promise<StatusResult> {
   return P.parseStatus(res.stdout)
 }
 
+// --- Caching --------------------------------------------------------------
+//
+// Spawning git is the dominant cost of a refresh (tens of ms per process on
+// Windows before git does any work), and `log --all --topo-order` gets slow on
+// large histories. History, tags and branches are pure functions of the refs
+// (plus, for branches, the upstream config), so they are cached against a
+// cheap fingerprint of every ref and reused until something actually moves.
+
+interface RefsState {
+  /** Changes whenever HEAD or any ref (branch, remote, tag, stash…) moves. */
+  fp: string
+  /** Short name of the checked-out branch; null when detached. */
+  headBranch: string | null
+  /** False when git could not read the refs, so nothing should be cached. */
+  cacheable: boolean
+}
+
+interface RefCache {
+  fp: string
+  logs: Map<string, CommitInfo[]>
+  tags?: TagInfo[]
+  branches?: { stamp: string; data: BranchInfo[] }
+}
+
+const MAX_CACHED_REPOS = 50
+const refCaches = new Map<string, RefCache>()
+
+/** Cached results for exactly these refs, if any. */
+function cached(path: string, refs: RefsState): RefCache | undefined {
+  const c = refCaches.get(path)
+  return refs.cacheable && c?.fp === refs.fp ? c : undefined
+}
+
+/** Results computed during one refresh, waiting to be written to the cache. */
+type Pending = ((c: RefCache) => void)[]
+
+/**
+ * Stores freshly computed results, but only once the refs are confirmed not to
+ * have moved while git was running — otherwise the output could describe a
+ * newer state than the fingerprint it would be filed under. Runs in the
+ * background so the caller never waits on the extra check.
+ */
+function commitPending(path: string, refs: RefsState, pending: Pending): void {
+  if (!pending.length || !refs.cacheable) return
+  void readRefs(path).then((now) => {
+    if (!now.cacheable || now.fp !== refs.fp) return
+    let c = refCaches.get(path)
+    if (!c || c.fp !== now.fp) {
+      c = { fp: now.fp, logs: new Map() }
+      refCaches.delete(path)
+      refCaches.set(path, c)
+      if (refCaches.size > MAX_CACHED_REPOS) {
+        refCaches.delete(refCaches.keys().next().value as string)
+      }
+    }
+    for (const put of pending) put(c)
+  })
+}
+
+async function readRefs(path: string): Promise<RefsState> {
+  const [sym, refs] = await Promise.all([
+    // Exits 1 on a detached HEAD; works on an unborn branch, unlike rev-parse.
+    runGit(path, ['symbolic-ref', '-q', 'HEAD']),
+    // Exits 1 when there are no refs at all (fresh repository).
+    runGit(path, ['show-ref', '--head'])
+  ])
+  const symName = sym.code === 0 ? sym.stdout.trim() : ''
+  return {
+    fp: symName + '\n' + refs.stdout,
+    headBranch: symName.startsWith('refs/heads/') ? symName.slice('refs/heads/'.length) : null,
+    cacheable: (sym.code === 0 || sym.code === 1) && (refs.code === 0 || refs.code === 1)
+  }
+}
+
+const topLevels = new Map<string, Promise<string | null>>()
+
+/** Working-tree root containing `path`, found by looking for `.git` rather than spawning git. */
+function topLevel(path: string): Promise<string | null> {
+  let found = topLevels.get(path)
+  if (!found) {
+    found = (async () => {
+      let dir = resolve(path)
+      for (;;) {
+        try {
+          await fs.stat(join(dir, '.git'))
+          return dir
+        } catch {
+          const up = dirname(dir)
+          if (up === dir) return null
+          dir = up
+        }
+      }
+    })()
+    topLevels.set(path, found)
+    // Don't remember a miss: the folder may simply not exist yet.
+    void found.then((top) => {
+      if (!top) topLevels.delete(path)
+    })
+  }
+  return found
+}
+
+/**
+ * Identifies the current contents of the repository's config file, or null
+ * when it can't be located cheaply (e.g. a linked worktree, whose `.git` is a
+ * file). Upstream tracking lives there, so it versions the branch list.
+ */
+async function configStamp(path: string): Promise<string | null> {
+  const top = await topLevel(path)
+  if (!top) return null
+  try {
+    const st = await fs.stat(join(top, '.git', 'config'))
+    return `${st.mtimeMs}:${st.size}`
+  } catch {
+    return null
+  }
+}
+
+async function logWithRefs(
+  path: string,
+  limit: number,
+  ref: string | undefined,
+  refs: RefsState,
+  pending: Pending
+): Promise<CommitInfo[]> {
+  const key = `${limit}\0${ref ?? ''}`
+  const hit = cached(path, refs)?.logs.get(key)
+  if (hit) return hit
+  const commits = await rawLog(path, limit, ref)
+  pending.push((c) => c.logs.set(key, commits))
+  return commits
+}
+
+async function tagsWithRefs(path: string, refs: RefsState, pending: Pending): Promise<TagInfo[]> {
+  const hit = cached(path, refs)?.tags
+  if (hit) return hit
+  const data = await tags(path)
+  pending.push((c) => (c.tags = data))
+  return data
+}
+
+async function branchesWithRefs(
+  path: string,
+  refs: RefsState,
+  pending: Pending
+): Promise<BranchInfo[]> {
+  const stamp = refs.cacheable ? await configStamp(path) : null
+  const hit = cached(path, refs)?.branches
+  if (stamp && hit?.stamp === stamp) return hit.data
+  const data = await branches(path)
+  if (stamp) pending.push((c) => (c.branches = { stamp, data }))
+  return data
+}
+
+/**
+ * Everything a full refresh needs, gathered in one round trip with every git
+ * call running in parallel. With `followHead` the history follows the
+ * checked-out branch (falling back to `ref` on a detached HEAD); the resolved
+ * ref is returned as `historyBranch`. Submodules are deliberately excluded:
+ * `git submodule status` can take seconds, so callers load it separately.
+ */
+export async function snapshot(
+  path: string,
+  ref: string | undefined,
+  followHead: boolean,
+  limit = 500
+): Promise<RepoSnapshot> {
+  const attempt = async <T>(fn: () => Promise<T>, fallback: T): Promise<[T, string | null]> => {
+    try {
+      return [await fn(), null]
+    } catch (e) {
+      return [fallback, String((e as Error)?.message || e)]
+    }
+  }
+  const statusP = attempt<StatusResult | null>(() => status(path), null)
+  const stashesP = attempt(() => stashes(path), [] as StashInfo[])
+  const remotesP = attempt(() => remotes(path), [] as RemoteInfo[])
+  const refs = await readRefs(path)
+  const historyBranch = followHead && refs.headBranch ? refs.headBranch : (ref ?? '')
+  const pending: Pending = []
+  const [st, lg, br, sh, rm, tg] = await Promise.all([
+    statusP,
+    attempt(
+      () => logWithRefs(path, limit, historyBranch || undefined, refs, pending),
+      [] as CommitInfo[]
+    ),
+    attempt(() => branchesWithRefs(path, refs, pending), [] as BranchInfo[]),
+    stashesP,
+    remotesP,
+    attempt(() => tagsWithRefs(path, refs, pending), [] as TagInfo[])
+  ])
+  commitPending(path, refs, pending)
+  const error = [st, lg, br, sh, rm, tg].map(([, e]) => e).find((e) => e) ?? null
+  return {
+    status: st[0],
+    historyBranch,
+    commits: lg[0],
+    branches: br[0],
+    stashes: sh[0],
+    remotes: rm[0],
+    tags: tg[0],
+    error
+  }
+}
+
 export async function log(path: string, limit = 500, ref?: string): Promise<CommitInfo[]> {
+  const refs = await readRefs(path)
+  const pending: Pending = []
+  const commits = await logWithRefs(path, limit, ref, refs, pending)
+  commitPending(path, refs, pending)
+  return commits
+}
+
+async function rawLog(path: string, limit: number, ref?: string): Promise<CommitInfo[]> {
   const scope = ref && ref.trim() ? [ref] : ['--all']
   const res = await runGit(path, [
     'log',
@@ -59,6 +273,39 @@ export async function log(path: string, limit = 500, ref?: string): Promise<Comm
   // A repository with no commits yet exits non-zero; treat as empty history.
   if (res.code !== 0) return []
   return P.parseLog(res.stdout)
+}
+
+/** Searches every commit on every ref by SHA prefix, message or author. */
+export async function searchLog(path: string, query: string): Promise<CommitInfo[]> {
+  const q = query.trim()
+  if (!q) return []
+  const base = [
+    'log',
+    '--all',
+    '--topo-order',
+    '--regexp-ignore-case',
+    '--fixed-strings',
+    `--pretty=format:${P.LOG_FORMAT}`
+  ]
+  // git ANDs --grep with --author, so each needs its own walk.
+  const runs = [runGit(path, [...base, `--grep=${q}`]), runGit(path, [...base, `--author=${q}`])]
+  // Direct lookup also finds commits no ref reaches (e.g. dropped stashes, rewritten history).
+  const isSha = /^[0-9a-f]{4,40}$/i.test(q)
+  if (isSha) runs.unshift(runGit(path, ['log', '--no-walk', `--pretty=format:${P.LOG_FORMAT}`, q, '--']))
+  const results = await Promise.all(runs)
+  const shaHits = isSha && results[0].code === 0 ? P.parseLog(results[0].stdout) : []
+  const seen = new Set(shaHits.map((c) => c.hash))
+  const rest: CommitInfo[] = []
+  for (const r of isSha ? results.slice(1) : results) {
+    if (r.code !== 0) continue
+    for (const c of P.parseLog(r.stdout)) {
+      if (seen.has(c.hash)) continue
+      seen.add(c.hash)
+      rest.push(c)
+    }
+  }
+  rest.sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+  return [...shaHits, ...rest]
 }
 
 export async function branches(path: string): Promise<BranchInfo[]> {
@@ -97,6 +344,16 @@ export async function tags(path: string): Promise<TagInfo[]> {
 }
 
 export async function submodules(path: string): Promise<SubmoduleInfo[]> {
+  // `git submodule status` costs well over a second on Windows (it starts a
+  // shell script) and, without a .gitmodules, just fails. Skip it outright.
+  const top = await topLevel(path)
+  if (top) {
+    try {
+      await fs.stat(join(top, '.gitmodules'))
+    } catch {
+      return []
+    }
+  }
   const res = await runGit(path, ['submodule', 'status'])
   if (res.code !== 0) return []
   return P.parseSubmodules(res.stdout)
@@ -338,6 +595,17 @@ export async function pushTag(path: string, remote: string, name: string): Promi
   await gitOk(path, ['push', remote, `refs/tags/${name}`])
 }
 
+/** Tag names present on the remote (network call). */
+export async function remoteTags(path: string, remote: string): Promise<string[]> {
+  if (!remote || remote.startsWith('-')) throw new Error('Invalid remote')
+  const res = await gitOk(path, ['ls-remote', '--tags', '--refs', remote])
+  return res.stdout
+    .split('\n')
+    .map((l) => l.split('\t')[1]?.trim())
+    .filter((r): r is string => !!r && r.startsWith('refs/tags/'))
+    .map((r) => r.slice('refs/tags/'.length))
+}
+
 export async function submoduleUpdate(
   path: string,
   init: boolean,
@@ -378,6 +646,26 @@ export async function restoreFileFromCommit(
   file: string
 ): Promise<void> {
   await gitOk(path, ['checkout', hash, '--', file])
+}
+
+/**
+ * Resolves a conflicted file wholesale with one side's version and stages it.
+ * "ours" is the current branch, "theirs" the incoming one (VS Code's Current /
+ * Incoming). When that side deleted the file, resolving to it means removing it.
+ */
+export async function resolveConflict(
+  path: string,
+  file: string,
+  side: 'ours' | 'theirs'
+): Promise<void> {
+  const res = await runGit(path, ['checkout', `--${side}`, '--', file])
+  if (res.code === 0) {
+    await gitOk(path, ['add', '--', file])
+  } else if (/does not have (our|their) version/i.test(res.stderr)) {
+    await gitOk(path, ['rm', '--quiet', '--', file])
+  } else {
+    throw new Error(res.stderr.trim() || `Could not resolve "${file}"`)
+  }
 }
 
 async function refExists(path: string, ref: string): Promise<boolean> {

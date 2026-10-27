@@ -1,4 +1,4 @@
-import { useMemo, useState, type MouseEvent } from 'react'
+import { memo, useCallback, useMemo, useState, type MouseEvent } from 'react'
 import { useStore } from '../store'
 import { buildGraph, LANE_COLORS, type GraphRow } from '../lib/graph'
 import { fullDate, relativeTime, shortDateTime } from '../lib/format'
@@ -6,7 +6,7 @@ import { DiffViewer } from './DiffViewer'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { Modal } from './Dialog'
 import { useResizable } from '../lib/useResizable'
-import type { CommitDetail, CompareDetail, FileChange, ResetMode } from '@shared/types'
+import type { CommitDetail, CommitInfo, CompareDetail, FileChange, ResetMode } from '@shared/types'
 
 const ROW_H = 32
 const LANE_W = 14
@@ -76,6 +76,64 @@ function refBadges(refs: string[]): Badge[] {
   }
   return out
 }
+
+/**
+ * One history row. Memoised so that selecting a commit only re-renders the
+ * rows whose highlight changed, and a refresh that returned identical commits
+ * (kept by reference in the store) re-renders none of them.
+ */
+const CommitRow = memo(function CommitRow({
+  c,
+  row,
+  graphWidth,
+  selected,
+  compare,
+  onRowClick,
+  onRowMenu
+}: {
+  c: CommitInfo
+  row: GraphRow
+  graphWidth: number
+  selected: boolean
+  compare: boolean
+  onRowClick: (e: MouseEvent, hash: string) => void
+  onRowMenu: (e: MouseEvent, hash: string) => void
+}) {
+  return (
+    <tr
+      className={'commit-row' + (selected ? ' selected' : '') + (compare ? ' compare' : '')}
+      onClick={(e) => onRowClick(e, c.hash)}
+      onContextMenu={(e) => onRowMenu(e, c.hash)}
+    >
+      <td className="col-graph" style={{ width: graphWidth }}>
+        <GraphCell row={row} width={graphWidth} />
+      </td>
+      <td className="col-msg">
+        <div className="msg-wrap">
+          {refBadges(c.refs).map((b, bi) => (
+            <span key={bi} className={'ref-badge ' + b.type}>
+              {b.name}
+            </span>
+          ))}
+          <span className="msg-text">{c.subject}</span>
+        </div>
+      </td>
+      <td className="col-author">{c.author}</td>
+      {/* Absolute time, with the relative reading kept in the tooltip:
+          ordering commits made minutes apart needs the clock time. The
+          tooltip is built on hover so "x minutes ago" is never stale. */}
+      <td
+        className="col-date"
+        onMouseEnter={(e) => {
+          e.currentTarget.title = `${fullDate(c.date)} (${relativeTime(c.date)})`
+        }}
+      >
+        {shortDateTime(c.date)}
+      </td>
+      <td className="col-hash">{c.shortHash}</td>
+    </tr>
+  )
+})
 
 function statusLetter(status: FileChange['status']): string {
   switch (status) {
@@ -236,6 +294,7 @@ export function HistoryView() {
   const toggleCompareCommit = useStore((s) => s.toggleCompareCommit)
   const detail = useStore((s) => s.commitDetail)
   const historyQuery = useStore((s) => s.historyQuery)
+  const searchResults = useStore((s) => s.searchResults)
   const setHistoryQuery = useStore((s) => s.setHistoryQuery)
   const historyBranch = useStore((s) => s.historyBranch)
   const setHistoryBranch = useStore((s) => s.setHistoryBranch)
@@ -245,6 +304,7 @@ export function HistoryView() {
   const revert = useStore((s) => s.revertCommit)
   const cherryPick = useStore((s) => s.cherryPick)
   const copySha = useStore((s) => s.copySha)
+  const copyText = useStore((s) => s.copyText)
 
   const [menu, setMenu] = useState<{ x: number; y: number; hash: string } | null>(null)
   const [branchAt, setBranchAt] = useState<string | null>(null)
@@ -270,21 +330,30 @@ export function HistoryView() {
   const locals = branches.filter((b) => !b.isRemote)
   const remoteBranches = branches.filter((b) => b.isRemote)
 
-  const onRowClick = (e: MouseEvent, hash: string): void => {
-    if (e.ctrlKey || e.metaKey) toggleCompareCommit(hash)
-    else selectCommit(hash)
-  }
+  const onRowClick = useCallback(
+    (e: MouseEvent, hash: string): void => {
+      if (e.ctrlKey || e.metaKey) toggleCompareCommit(hash)
+      else selectCommit(hash)
+    },
+    [toggleCompareCommit, selectCommit]
+  )
+
+  const onRowMenu = useCallback((e: MouseEvent, hash: string): void => {
+    e.preventDefault()
+    setMenu({ x: e.clientX, y: e.clientY, hash })
+  }, [])
 
   const filtered = useMemo(() => {
     const q = historyQuery.trim().toLowerCase()
     if (!q) return commits
+    if (searchResults) return searchResults
     return commits.filter(
       (c) =>
         c.hash.toLowerCase().includes(q) ||
         c.subject.toLowerCase().includes(q) ||
         c.author.toLowerCase().includes(q)
     )
-  }, [commits, historyQuery])
+  }, [commits, historyQuery, searchResults])
 
   const rows = useMemo(() => buildGraph(filtered), [filtered])
   const graphWidth = useMemo(
@@ -339,7 +408,10 @@ export function HistoryView() {
         onClick: () => setResetAt(hash)
       },
       { separator: true },
-      { label: 'Copy SHA to Clipboard', onClick: () => copySha(hash) }
+      { label: 'Copy SHA to Clipboard', onClick: () => copySha(hash) },
+      ...refBadges(commits.find((c) => c.hash === hash)?.refs ?? [])
+        .filter((b) => b.type === 'tag')
+        .map((b) => ({ label: `Copy Tag Name "${b.name}"`, onClick: () => copyText(b.name) }))
     ]
   }
 
@@ -439,43 +511,16 @@ export function HistoryView() {
             </thead>
             <tbody>
               {filtered.map((c, i) => (
-                <tr
+                <CommitRow
                   key={c.hash}
-                  className={
-                    'commit-row' +
-                    (c.hash === selected ? ' selected' : '') +
-                    (c.hash === compareCommit ? ' compare' : '')
-                  }
-                  onClick={(e) => onRowClick(e, c.hash)}
-                  onContextMenu={(e) => {
-                    e.preventDefault()
-                    setMenu({ x: e.clientX, y: e.clientY, hash: c.hash })
-                  }}
-                >
-                  <td className="col-graph" style={{ width: graphWidth }}>
-                    <GraphCell row={rows[i]} width={graphWidth} />
-                  </td>
-                  <td className="col-msg">
-                    <div className="msg-wrap">
-                      {refBadges(c.refs).map((b, bi) => (
-                        <span key={bi} className={'ref-badge ' + b.type}>
-                          {b.name}
-                        </span>
-                      ))}
-                      <span className="msg-text">{c.subject}</span>
-                    </div>
-                  </td>
-                  <td className="col-author">{c.author}</td>
-                  {/* Absolute time, with the relative reading kept in the tooltip:
-                      ordering commits made minutes apart needs the clock time. */}
-                  <td
-                    className="col-date"
-                    title={`${fullDate(c.date)} (${relativeTime(c.date)})`}
-                  >
-                    {shortDateTime(c.date)}
-                  </td>
-                  <td className="col-hash">{c.shortHash}</td>
-                </tr>
+                  c={c}
+                  row={rows[i]}
+                  graphWidth={graphWidth}
+                  selected={c.hash === selected}
+                  compare={c.hash === compareCommit}
+                  onRowClick={onRowClick}
+                  onRowMenu={onRowMenu}
+                />
               ))}
             </tbody>
           </table>

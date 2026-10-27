@@ -106,16 +106,21 @@ function NewTagDialog({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState('')
   const createTag = useStore((s) => s.createTag)
   const busy = useStore((s) => s.busy)
+  // Captured on open so a click in the history behind the dialog can't retarget it.
+  const [target] = useState(() => {
+    const s = useStore.getState()
+    return s.view === 'history' ? s.selectedCommit : null
+  })
 
   const submit = async (): Promise<void> => {
     if (!name.trim()) return
-    const ok = await createTag(name.trim(), message.trim())
+    const ok = await createTag(name.trim(), message.trim(), target ?? undefined)
     if (ok) onClose()
   }
 
   return (
     <Modal
-      title="New Tag"
+      title={target ? `New Tag at ${target.slice(0, 7)}` : 'New Tag at HEAD'}
       onClose={onClose}
       footer={
         <>
@@ -295,7 +300,7 @@ export function Toolbar() {
         label="Tag"
         disabled={disabled}
         onClick={() => setTagOpen(true)}
-        title="Create a tag"
+        title="Create a tag on the commit selected in History (or HEAD)"
       />
       <TBtn
         icon="⚑"

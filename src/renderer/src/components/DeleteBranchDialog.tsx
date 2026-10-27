@@ -16,7 +16,7 @@ export function DeleteBranchDialog({
   branch: BranchInfo
   onClose: () => void
 }) {
-  const [force, setForce] = useState(false)
+  const [force, setForce] = useState(!!branch.gone)
   const deleteBranch = useStore((s) => s.deleteBranch)
   const busy = useStore((s) => s.busy)
 

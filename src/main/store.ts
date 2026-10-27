@@ -154,9 +154,18 @@ export async function getSettings(): Promise<AppSettings> {
   }
 }
 
-export async function setSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
-  const current = await getSettings()
-  const next = { ...current, ...patch }
-  await fs.writeFile(settingsFile(), JSON.stringify(next, null, 2), 'utf8')
-  return next
+// Writes are queued: each is a read-modify-write of the whole file, so two
+// overlapping calls (e.g. a group change and a repo switch) would otherwise
+// lose one of the patches.
+let settingsQueue: Promise<unknown> = Promise.resolve()
+
+export function setSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+  const run = settingsQueue.then(async () => {
+    const current = await getSettings()
+    const next = { ...current, ...patch }
+    await fs.writeFile(settingsFile(), JSON.stringify(next, null, 2), 'utf8')
+    return next
+  })
+  settingsQueue = run.catch(() => undefined)
+  return run
 }

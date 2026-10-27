@@ -16,6 +16,7 @@ import type {
   RemoteInfo,
   RepoBookmark,
   RepoGroup,
+  RepoSnapshot,
   ResetMode,
   StashDetail,
   StashInfo,
@@ -72,8 +73,15 @@ const api = {
     ipcRenderer.invoke(CH.openFile, p, file),
 
   status: (p: string): Promise<GitResult<StatusResult>> => ipcRenderer.invoke(CH.status, p),
+  snapshot: (
+    p: string,
+    ref: string | undefined,
+    followHead: boolean
+  ): Promise<GitResult<RepoSnapshot>> => ipcRenderer.invoke(CH.snapshot, p, ref, followHead),
   log: (p: string, limit?: number, ref?: string): Promise<GitResult<CommitInfo[]>> =>
     ipcRenderer.invoke(CH.log, p, limit, ref),
+  searchLog: (p: string, query: string): Promise<GitResult<CommitInfo[]>> =>
+    ipcRenderer.invoke(CH.searchLog, p, query),
   branches: (p: string): Promise<GitResult<BranchInfo[]>> => ipcRenderer.invoke(CH.branches, p),
   stashes: (p: string): Promise<GitResult<StashInfo[]>> => ipcRenderer.invoke(CH.stashes, p),
   remotes: (p: string): Promise<GitResult<RemoteInfo[]>> => ipcRenderer.invoke(CH.remotes, p),
@@ -152,6 +160,8 @@ const api = {
     ipcRenderer.invoke(CH.deleteTag, p, name),
   pushTag: (p: string, remote: string, name: string): Promise<GitResult> =>
     ipcRenderer.invoke(CH.pushTag, p, remote, name),
+  remoteTags: (p: string, remote: string): Promise<GitResult<string[]>> =>
+    ipcRenderer.invoke(CH.remoteTags, p, remote),
   submoduleUpdate: (p: string, init: boolean, paths?: string[]): Promise<GitResult> =>
     ipcRenderer.invoke(CH.submoduleUpdate, p, init, paths),
   rebase: (p: string, onto: string): Promise<GitResult> => ipcRenderer.invoke(CH.rebase, p, onto),
@@ -167,6 +177,8 @@ const api = {
     ipcRenderer.invoke(CH.externalDiffCommit, p, hash, file),
   mergeTool: (p: string, file: string): Promise<GitResult> =>
     ipcRenderer.invoke(CH.mergeTool, p, file),
+  resolveConflict: (p: string, file: string, side: 'ours' | 'theirs'): Promise<GitResult> =>
+    ipcRenderer.invoke(CH.resolveConflict, p, file, side),
   copyText: (text: string): Promise<void> => ipcRenderer.invoke(CH.copyText, text),
   refocus: (): Promise<void> => ipcRenderer.invoke(CH.appRefocus),
   onRefresh: (cb: () => void): (() => void) => {

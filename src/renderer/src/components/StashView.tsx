@@ -48,7 +48,11 @@ export function StashView() {
               <span className="stash-title" title={stash.message}>
                 ⚑ {stash.name}
               </span>
-              {stash.branch && <span className="stash-branch">{stash.branch}</span>}
+              {stash.branch && (
+                <span className="stash-branch" title={stash.branch}>
+                  {stash.branch}
+                </span>
+              )}
             </span>
             <div className="group-btns">
               <button

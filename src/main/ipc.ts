@@ -223,8 +223,14 @@ export function registerIpc(): void {
   )
 
   ipcMain.handle(CH.status, (_e, p: string) => wrap(() => repo.status(p)))
+  ipcMain.handle(CH.snapshot, (_e, p: string, ref: string | undefined, followHead: boolean) =>
+    wrap(() => repo.snapshot(p, ref, followHead))
+  )
   ipcMain.handle(CH.log, (_e, p: string, limit?: number, ref?: string) =>
     wrap(() => repo.log(p, limit, ref))
+  )
+  ipcMain.handle(CH.searchLog, (_e, p: string, query: string) =>
+    wrap(() => repo.searchLog(p, query))
   )
   ipcMain.handle(CH.branches, (_e, p: string) => wrap(() => repo.branches(p)))
   ipcMain.handle(CH.stashes, (_e, p: string) => wrap(() => repo.stashes(p)))
@@ -316,6 +322,9 @@ export function registerIpc(): void {
   ipcMain.handle(CH.pushTag, (_e, p: string, remote: string, name: string) =>
     wrap(() => repo.pushTag(p, remote, name))
   )
+  ipcMain.handle(CH.remoteTags, (_e, p: string, remote: string) =>
+    wrap(() => repo.remoteTags(p, remote))
+  )
   ipcMain.handle(CH.submoduleUpdate, (_e, p: string, init: boolean, paths?: string[]) =>
     wrap(() => repo.submoduleUpdate(p, init, paths))
   )
@@ -336,6 +345,12 @@ export function registerIpc(): void {
     wrap(() => externalDiff(p, hash, file))
   )
   ipcMain.handle(CH.mergeTool, (_e, p: string, file: string) => wrap(() => openMergeTool(p, file)))
+  ipcMain.handle(CH.resolveConflict, (_e, p: string, file: string, side: 'ours' | 'theirs') =>
+    wrap(() => {
+      if (side !== 'ours' && side !== 'theirs') throw new Error(`Unknown side: ${side}`)
+      return repo.resolveConflict(p, file, side)
+    })
+  )
   ipcMain.handle(CH.copyText, (_e, text: string) => {
     clipboard.writeText(text)
   })

@@ -1,21 +1,20 @@
 ## Features
+Work on performance. This application seems to be runnning rather slowly doing most tasks.
+Some idea to speed this up could be;
+ - Have the opened repos in the session cached.
+ - Run operations in parallel.
+ - Load up key areas one at a time.
 
 
 ## Tasks
 
-
 ## Bugs
 
 
+
 ## In Test
-Review prompt: "Review prompt" button per group in Repository Groups copies "Code review branch <group branch> across repos <names>".
-Right click autocorrect: native context menu in text fields with spelling suggestions, Add to Dictionary, cut/copy/paste.
-Cherry pick a merge commit: uses `-m 1` (first parent) when the commit has multiple parents.
-Commit box can't type (again): window is re-focused after every native confirm() (Windows loses keyboard input after native dialogs).
-Push tag: "Push" button on each tag in the Sidebar runs git push origin <tag>.
-FeatureID suffix: only shown/applied when a group is selected in the toolbar filter (and contains the active repo).
-Refresh automatically after a merge conflict.
-Still the commit message box is blocked. Looks like I can paste information into it, but cannot type because it is disabled.
-
-
-
+Add in a search to the repo drop down.
+Occasionally getting errors like git lock. Having to manually resolve with reselecting the stage button. If that message is returned, just go ahead and replay the command automatically.
+For stashes, the stash name shouldn't be cut off. Instead the branch stashed from should be cut short.
+Able to right click on merge issue and have the choices of 'Accept incoming', 'Override with current', etc.
+Discarding a file change causes the application to flicker (an application underneath is displayed momentarily).

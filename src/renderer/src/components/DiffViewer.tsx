@@ -1,7 +1,8 @@
-import { useEffect, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { activeLineSelection, useStore } from '../store'
 import type { DiffLine, DiffLineType } from '@shared/types'
 import { buildHunkPatch } from '../lib/patch'
+import { ConfirmDialog } from './Dialog'
 
 function marker(type: DiffLineType): string {
   if (type === 'add') return '+'
@@ -25,12 +26,16 @@ export function DiffViewer() {
   const setLineSel = useStore((s) => s.setLineSelection)
   const applyLines = useStore((s) => s.applyLineSelection)
   const discardLines = useStore((s) => s.discardLineSelection)
+  const [pendingDiscard, setPendingDiscard] = useState<{
+    message: string
+    run: () => void
+  } | null>(null)
 
   // Escape is the way out of a line selection, mirroring the file list.
   useEffect(() => {
     if (!lineSel) return
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setLineSel(null)
+      if (e.key === 'Escape' && !document.querySelector('.modal')) setLineSel(null)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -122,10 +127,12 @@ export function DiffViewer() {
                             <button
                               className="mini-btn danger"
                               title="Discard only the selected lines"
-                              onClick={() => {
-                                if (confirm(`Discard ${count} selected line(s)? This cannot be undone.`))
-                                  discardLines()
-                              }}
+                              onClick={() =>
+                                setPendingDiscard({
+                                  message: `Discard ${count} selected line(s)? This cannot be undone.`,
+                                  run: () => discardLines()
+                                })
+                              }
                             >
                               Discard {lineLabel}
                             </button>
@@ -151,10 +158,12 @@ export function DiffViewer() {
                           <button
                             className="mini-btn danger"
                             title="Discard this hunk"
-                            onClick={() => {
-                              if (confirm('Discard this hunk? This cannot be undone.'))
-                                discardHunk(buildHunkPatch(diff.path, h))
-                            }}
+                            onClick={() =>
+                              setPendingDiscard({
+                                message: 'Discard this hunk? This cannot be undone.',
+                                run: () => discardHunk(buildHunkPatch(diff.path, h))
+                              })
+                            }
                           >
                             Discard Hunk
                           </button>
@@ -196,6 +205,15 @@ export function DiffViewer() {
           </div>
         )}
       </div>
+      {pendingDiscard && (
+        <ConfirmDialog
+          title="Discard changes"
+          message={pendingDiscard.message}
+          confirmLabel="Discard"
+          onConfirm={pendingDiscard.run}
+          onClose={() => setPendingDiscard(null)}
+        />
+      )}
     </div>
   )
 }
