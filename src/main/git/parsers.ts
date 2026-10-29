@@ -243,6 +243,55 @@ export const TAG_FORMAT = [
   '%(*contents:subject)'
 ].join(SEP)
 
+/** Every ref in one for-each-ref pass: enough for branches, tags and the stash. */
+export const REFS_FORMAT =
+  [
+    '%(refname)',
+    '%(objectname)',
+    '%(HEAD)',
+    '%(upstream:short)',
+    '%(upstream:track)',
+    TAG_FORMAT
+  ].join(SEP) + REC
+
+export interface RefEntry {
+  refname: string
+  short: string
+  objectname: string
+}
+
+export interface ParsedRefs {
+  refs: RefEntry[]
+  branches: BranchInfo[]
+  tags: TagInfo[]
+}
+
+export function parseRefs(raw: string): ParsedRefs {
+  const refs: RefEntry[] = []
+  const branchLines: string[] = []
+  const tagLines: string[] = []
+  for (let rec of raw.split(REC)) {
+    rec = rec.replace(/^\n/, '')
+    if (!rec) continue
+    const f = rec.split(SEP)
+    if (f.length < 12) continue
+    const [refname, objectname, head, upstream, track] = f
+    const tagFields = f.slice(5)
+    refs.push({ refname, short: tagFields[0], objectname })
+    if (refname.startsWith('refs/heads/') || refname.startsWith('refs/remotes/')) {
+      branchLines.push([head, refname, tagFields[0], upstream, track].join('\t'))
+    } else if (refname.startsWith('refs/tags/')) {
+      // Subjects may contain anything but newlines, so a line per tag is safe.
+      tagLines.push(tagFields.join(SEP))
+    }
+  }
+  const tags = parseTags(tagLines.join('\n'))
+  // Newest first, as `--sort=-creatordate` would give.
+  const time = (t: TagInfo): number => (t.date ? Date.parse(t.date) || 0 : 0)
+  tags.sort((a, b) => time(b) - time(a))
+  return { refs, branches: parseBranches(branchLines.join('\n')), tags }
+}
+
 export function parseTags(raw: string): TagInfo[] {
   const out: TagInfo[] = []
   for (const line of raw.split('\n')) {

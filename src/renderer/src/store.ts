@@ -3,8 +3,9 @@ import { buildLinePatch } from './lib/patch'
 import {
   dropCachedRepo,
   getCachedRepo,
-  loadPersistedRepo,
+  loadPersistedRepos,
   putCachedRepo,
+  touchCachedRepo,
   type RepoCacheEntry
 } from './lib/repoCache'
 import type {
@@ -70,6 +71,8 @@ export interface AppState {
 
   status: StatusResult | null
   commits: CommitInfo[]
+  /** Main's key for `commits`, so an unchanged history isn't re-sent; '' = unknown. */
+  logKey: string
   branches: BranchInfo[]
   stashes: StashInfo[]
   remotes: RemoteInfo[]
@@ -138,6 +141,7 @@ export interface AppState {
   ) => Promise<GroupRepoResult[] | null>
   /** Dry run of checkoutGroupBranch, so blockers show before anything is changed. */
   checkGroupCheckout: (paths: string[], branch: string) => Promise<GroupRepoResult[] | null>
+  checkGroupClean: (paths: string[]) => Promise<GroupRepoResult[] | null>
   checkoutGroupBranch: (paths: string[], branch: string) => Promise<GroupRepoResult[] | null>
   refreshAll: () => Promise<void>
   refreshStatus: () => Promise<void>
@@ -252,8 +256,14 @@ function keep<T>(prev: T, next: T): T {
   return JSON.stringify(prev) === JSON.stringify(next) ? prev : next
 }
 
-// Paint the repository from the last session straight away on startup.
-loadPersistedRepo()
+// Background refresh of the other repositories, so switching to one paints
+// data that is seconds old rather than from whenever it was last opened.
+const PREFETCH_MAX = 20
+const PREFETCH_FRESH_MS = 2 * 60_000
+const PREFETCH_DELAY_MS = 1500
+let prefetchRun = 0
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 export const useStore = create<AppState>((set, get) => {
   /**
@@ -269,6 +279,7 @@ export const useStore = create<AppState>((set, get) => {
       status: s.status,
       historyBranch: s.historyBranchAuto ? s.historyBranch : (prev?.historyBranch ?? ''),
       commits: s.historyBranchAuto ? s.commits : (prev?.commits ?? []),
+      logKey: s.historyBranchAuto ? s.logKey : (prev?.logKey ?? ''),
       branches: s.branches,
       stashes: s.stashes,
       remotes: s.remotes,
@@ -276,8 +287,89 @@ export const useStore = create<AppState>((set, get) => {
       submodules: s.submodules,
       remoteTags: s.remoteTags,
       remoteTagsAt: prev?.remoteTagsAt ?? 0,
+      at: prev?.at ?? 0,
       ...extra
     })
+  }
+
+  /**
+   * Refreshes the other repositories in the group filter (or all of them) one
+   * at a time into the repo cache only, yielding to anything the user does.
+   * A newer call supersedes an older one.
+   */
+  async function prefetchOthers(): Promise<void> {
+    const run = ++prefetchRun
+    await sleep(PREFETCH_DELAY_MS)
+    const s = get()
+    const group = s.groups.find((g) => g.id === s.activeGroupId)
+    const pool = (group ? s.repos.filter((r) => group.repoIds.includes(r.id)) : s.repos).slice(
+      0,
+      PREFETCH_MAX
+    )
+    for (const { path } of pool) {
+      while (get().busy || get().loading) {
+        if (run !== prefetchRun) return
+        await sleep(500)
+      }
+      if (run !== prefetchRun) return
+      const c = getCachedRepo(path)
+      if (path === get().activeRepoPath || (c && Date.now() - c.at < PREFETCH_FRESH_MS)) continue
+      const [st, res] = await Promise.all([
+        api.status(path),
+        api.snapshot(path, undefined, true, c?.logKey)
+      ])
+      const snap = res.data as RepoSnapshot | undefined
+      // The user may have opened it meanwhile; its live refresh owns the cache then.
+      if (!st.ok || !res.ok || !snap || snap.error || path === get().activeRepoPath) continue
+      const now = getCachedRepo(path)
+      putCachedRepo(path, {
+        status: st.data as StatusResult,
+        historyBranch: snap.historyBranch,
+        commits: snap.commits ?? now?.commits ?? [],
+        logKey: snap.commits || now?.logKey === snap.logKey ? snap.logKey : '',
+        branches: snap.branches,
+        stashes: snap.stashes,
+        remotes: snap.remotes,
+        tags: snap.tags,
+        submodules: now?.submodules ?? [],
+        remoteTags: now?.remoteTags ?? null,
+        remoteTagsAt: now?.remoteTagsAt ?? 0,
+        at: Date.now()
+      })
+    }
+  }
+
+  /** Publishes fresh working-tree status, optionally re-loading the open diff. */
+  async function loadStatus(p: string, reloadDiff: boolean): Promise<void> {
+    const seq = ++statusSeq
+    const st = await api.status(p)
+    if (get().activeRepoPath !== p || seq !== statusSeq) return
+    if (!st.ok) {
+      set({ error: st.error || 'Failed to load status' })
+      return
+    }
+    set({ status: keep(get().status, st.data as StatusResult) })
+    remember(p)
+    if (reloadDiff) await reloadOpenDiff(p)
+  }
+
+  /** Selects a working-copy file and shows its diff, optionally one already being loaded. */
+  async function openWorkingFile(
+    file: FileChange,
+    pending?: Promise<GitResult<FileDiff>>
+  ): Promise<void> {
+    const p = get().activeRepoPath
+    if (!p) return
+    const untracked = file.status === 'untracked'
+    set({
+      selectedFile: { kind: 'working', path: file.path, staged: file.staged, untracked },
+      diffLoading: true,
+      diff: null,
+      lineSelection: null
+    })
+    const res = await (pending ?? api.diffWorking(p, file.path, file.staged, untracked))
+    set({ diff: res.ok ? (res.data as FileDiff) : null, diffLoading: false })
+    if (!res.ok) set({ error: res.error || 'Failed to load diff' })
   }
 
   /**
@@ -364,6 +456,7 @@ export const useStore = create<AppState>((set, get) => {
     view: 'working',
     status: null,
     commits: [],
+    logKey: '',
     branches: [],
     stashes: [],
     remotes: [],
@@ -395,7 +488,9 @@ export const useStore = create<AppState>((set, get) => {
       const [repos, groups, settings] = await Promise.all([
         api.listRepos(),
         api.listGroups(),
-        api.getSettings()
+        api.getSettings(),
+        // Lets the last session's repositories paint before git answers.
+        loadPersistedRepos()
       ])
       // Restore the group filter, dropping a stale id left by a deleted group.
       const activeGroupId = groups.some((g) => g.id === settings.lastGroupId)
@@ -418,6 +513,7 @@ export const useStore = create<AppState>((set, get) => {
       // A repository seen before paints from the cache straight away; the
       // refresh below then replaces it with live data.
       const cached = getCachedRepo(path)
+      touchCachedRepo(path)
       set({
         activeRepoPath: path,
         // An action still running against the previous repo must not leave the
@@ -433,6 +529,7 @@ export const useStore = create<AppState>((set, get) => {
         diff: null,
         status: cached?.status ?? null,
         commits: cached?.commits ?? [],
+        logKey: cached?.logKey ?? '',
         branches: cached?.branches ?? [],
         stashes: cached?.stashes ?? [],
         remotes: cached?.remotes ?? [],
@@ -449,6 +546,7 @@ export const useStore = create<AppState>((set, get) => {
       void api.setSettings({ lastRepoPath: path })
       await get().refreshAll()
       void get().loadRemoteTags({ ifStale: true })
+      void prefetchOthers()
     },
 
     addRepoViaDialog: async () => {
@@ -487,6 +585,7 @@ export const useStore = create<AppState>((set, get) => {
             activeRepoPath: null,
             status: null,
             commits: [],
+            logKey: '',
             branches: [],
             stashes: [],
             remotes: [],
@@ -552,13 +651,18 @@ export const useStore = create<AppState>((set, get) => {
       const id = groupId && get().groups.some((g) => g.id === groupId) ? groupId : null
       set({ activeGroupId: id })
       void api.setSettings({ lastGroupId: id ?? undefined })
-      if (!id) return
+      if (!id) {
+        void prefetchOthers()
+        return
+      }
       // Keep the working copy inside the group: when the current repository is
       // not a member, switch to the group's first repository.
       const group = get().groups.find((g) => g.id === id)
       const members = get().repos.filter((r) => group?.repoIds.includes(r.id))
       if (members.length && !members.some((r) => r.path === get().activeRepoPath)) {
         await get().selectRepo(members[0].path)
+      } else {
+        void prefetchOthers()
       }
     },
 
@@ -600,6 +704,23 @@ export const useStore = create<AppState>((set, get) => {
         const active = get().activeRepoPath
         if (active && paths.includes(active)) await get().refreshAll()
         return results
+      } catch (e) {
+        set({ error: String((e as Error)?.message || e) })
+        return null
+      } finally {
+        set({ busy: null })
+      }
+    },
+
+    checkGroupClean: async (paths) => {
+      set({ busy: 'Checking repositories', error: null })
+      try {
+        const res = await api.checkGroupClean(paths)
+        if (!res.ok) {
+          set({ error: res.error || 'Check failed' })
+          return null
+        }
+        return res.data as GroupRepoResult[]
       } catch (e) {
         set({ error: String((e as Error)?.message || e) })
         return null
@@ -666,35 +787,57 @@ export const useStore = create<AppState>((set, get) => {
         })
         remember(p)
       })
-      // With auto on, main resolves the checked-out branch itself, so the log
-      // no longer has to wait for `git status` to finish first.
-      const res = await api.snapshot(p, reqBranch || undefined, reqAuto)
+      // Status is fetched on its own so the working copy paints as soon as it lands.
+      const statusP = api.status(p).then((st) => {
+        if (get().activeRepoPath !== p || seq !== statusSeq) return false
+        if (!st.ok) {
+          set({ error: st.error || 'Failed to load status' })
+          return false
+        }
+        set({ status: keep(get().status, st.data as StatusResult) })
+        return true
+      })
+      // With auto on, main resolves the checked-out branch itself.
+      const sentKey = get().logKey
+      const res = await api.snapshot(p, reqBranch || undefined, reqAuto, sentKey)
       // The user can switch repo while this is in flight; publishing then
       // would overwrite the new repo's state with this one's.
       if (get().activeRepoPath !== p) return
-      const fresh = seq === statusSeq
       const s = get()
       if (!res.ok || !res.data) {
-        set({ loading: false, error: res.error || 'Failed to load repository' })
+        set({ error: res.error || 'Failed to load repository' })
+        await statusP
+        if (get().activeRepoPath === p) set({ loading: false })
         return
       }
       const snap = res.data as RepoSnapshot
       // An explicit branch picked while this was running already loaded its own history.
       const historyCurrent =
         s.historyBranchAuto === reqAuto && (reqAuto || s.historyBranch === reqBranch)
+      // Null commits mean "same as what you sent"; only valid if that is still what's shown.
+      const history = !historyCurrent
+        ? {}
+        : snap.commits
+          ? {
+              historyBranch: snap.historyBranch,
+              commits: keep(s.commits, snap.commits),
+              logKey: snap.logKey
+            }
+          : s.logKey === sentKey
+            ? { historyBranch: snap.historyBranch, logKey: snap.logKey }
+            : {}
       set({
-        ...(fresh ? { status: keep(s.status, snap.status) } : {}),
-        ...(historyCurrent
-          ? { historyBranch: snap.historyBranch, commits: keep(s.commits, snap.commits) }
-          : {}),
+        ...history,
         branches: keep(s.branches, snap.branches),
         stashes: keep(s.stashes, snap.stashes),
         remotes: keep(s.remotes, snap.remotes),
         tags: keep(s.tags, snap.tags),
-        loading: false,
         error: snap.error ?? s.error
       })
-      remember(p)
+      const fresh = await statusP
+      if (get().activeRepoPath !== p) return
+      set({ loading: false })
+      remember(p, { at: Date.now() })
       if (get().historyQuery.trim()) void runSearch()
       if (!fresh) return
       await reloadOpenDiff(p)
@@ -706,16 +849,7 @@ export const useStore = create<AppState>((set, get) => {
     refreshStatus: async () => {
       const p = get().activeRepoPath
       if (!p) return
-      const seq = ++statusSeq
-      const st = await api.status(p)
-      if (get().activeRepoPath !== p || seq !== statusSeq) return
-      if (!st.ok) {
-        set({ error: st.error || 'Failed to load status' })
-        return
-      }
-      set({ status: keep(get().status, st.data as StatusResult) })
-      remember(p)
-      await reloadOpenDiff(p)
+      await loadStatus(p, true)
     },
 
     setView: (view) =>
@@ -811,18 +945,7 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     selectWorkingFile: async (file) => {
-      const p = get().activeRepoPath
-      if (!p) return
-      const untracked = file.status === 'untracked'
-      set({
-        selectedFile: { kind: 'working', path: file.path, staged: file.staged, untracked },
-        diffLoading: true,
-        diff: null,
-        lineSelection: null
-      })
-      const res = await api.diffWorking(p, file.path, file.staged, untracked)
-      set({ diff: res.ok ? (res.data as FileDiff) : null, diffLoading: false })
-      if (!res.ok) set({ error: res.error || 'Failed to load diff' })
+      await openWorkingFile(file)
     },
 
     selectStash: async (stash) => {
@@ -871,12 +994,21 @@ export const useStore = create<AppState>((set, get) => {
       // Remember where a single staged file sat so we can select its successor.
       const before = get().status?.unstaged ?? []
       const idx = paths.length === 1 ? before.findIndex((f) => f.path === paths[0]) : -1
+      // The successor (or, at the end, the predecessor) is almost always what
+      // gets selected next; staging another file can't change its diff.
+      const guess = idx >= 0 ? (before[idx + 1] ?? before[idx - 1]) : undefined
       if (await runAction('Staging', () => api.stage(p, paths))) {
-        await get().refreshStatus()
+        const guessDiff = guess
+          ? api.diffWorking(p, guess.path, false, guess.status === 'untracked')
+          : undefined
+        // The staged file's own diff is about to be replaced, so don't reload it.
+        await loadStatus(p, false)
+        if (get().activeRepoPath !== p) return
         if (idx >= 0) {
           const after = get().status?.unstaged ?? []
           const next = after.length ? after[Math.min(idx, after.length - 1)] : null
-          if (next) await get().selectWorkingFile(next)
+          const hit = next && guess && next.path === guess.path && next.status === guess.status
+          if (next) await openWorkingFile(next, hit ? guessDiff : undefined)
           else set({ selectedFile: null, diff: null })
         } else {
           set({ selectedFile: null, diff: null })
@@ -1240,7 +1372,7 @@ export const useStore = create<AppState>((set, get) => {
 
     setHistoryBranch: async (ref) => {
       // An explicit choice stops the filter from auto-tracking the current branch.
-      set({ historyBranch: ref, historyBranchAuto: false })
+      set({ historyBranch: ref, historyBranchAuto: false, logKey: '' })
       const p = get().activeRepoPath
       if (!p) return
       set({ loading: true })

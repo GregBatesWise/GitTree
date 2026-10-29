@@ -15,6 +15,22 @@ import type {
 import * as repo from './git/repo'
 import { runGit } from './git/run'
 import * as store from './store'
+import { trace, TRACE } from './trace'
+
+/** Logs how long every IPC call takes end to end (GITTREE_TRACE=1 only). */
+function traceIpcHandlers(): void {
+  const handle = ipcMain.handle.bind(ipcMain)
+  ipcMain.handle = (channel, listener) =>
+    handle(channel, async (e, ...args) => {
+      const start = performance.now()
+      try {
+        return await listener(e, ...args)
+      } finally {
+        const ms = (performance.now() - start).toFixed(0).padStart(5)
+        trace(`[ipc ${ms}ms] ${channel} ${String(args[0] ?? '')}`)
+      }
+    })
+}
 
 async function wrap<T>(fn: () => Promise<T>): Promise<GitResult<T>> {
   try {
@@ -162,6 +178,7 @@ async function openMergeTool(cwd: string, file: string): Promise<void> {
 }
 
 export function registerIpc(): void {
+  if (TRACE) traceIpcHandlers()
   ipcMain.handle(CH.reposList, () => store.listRepos())
 
   ipcMain.handle(CH.repoAdd, (_e, path: string) =>
@@ -193,6 +210,9 @@ export function registerIpc(): void {
   ipcMain.handle(CH.groupBranchRun, (_e, paths: string[], base: string, branch: string) =>
     wrap(() => repo.createGroupBranch(paths, base, branch))
   )
+  ipcMain.handle(CH.groupCleanCheck, (_e, paths: string[]) =>
+    wrap(() => repo.checkGroupClean(paths))
+  )
   ipcMain.handle(CH.groupCheckoutCheck, (_e, paths: string[], branch: string) =>
     wrap(() => repo.checkGroupCheckout(paths, branch))
   )
@@ -202,6 +222,8 @@ export function registerIpc(): void {
 
   ipcMain.handle(CH.settingsGet, () => store.getSettings())
   ipcMain.handle(CH.settingsSet, (_e, patch: Partial<AppSettings>) => store.setSettings(patch))
+  ipcMain.handle(CH.repoCacheLoad, () => store.loadRepoCache())
+  ipcMain.handle(CH.repoCacheSave, (_e, data: unknown) => store.saveRepoCache(data))
 
   ipcMain.handle(CH.openFolder, async () => {
     const win = BrowserWindow.getFocusedWindow()
@@ -223,8 +245,10 @@ export function registerIpc(): void {
   )
 
   ipcMain.handle(CH.status, (_e, p: string) => wrap(() => repo.status(p)))
-  ipcMain.handle(CH.snapshot, (_e, p: string, ref: string | undefined, followHead: boolean) =>
-    wrap(() => repo.snapshot(p, ref, followHead))
+  ipcMain.handle(
+    CH.snapshot,
+    (_e, p: string, ref: string | undefined, followHead: boolean, knownLogKey?: string) =>
+      wrap(() => repo.snapshot(p, ref, followHead, knownLogKey))
   )
   ipcMain.handle(CH.log, (_e, p: string, limit?: number, ref?: string) =>
     wrap(() => repo.log(p, limit, ref))

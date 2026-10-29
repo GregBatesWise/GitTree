@@ -1,9 +1,4 @@
 ## Features
-Work on performance. This application seems to be runnning rather slowly doing most tasks.
-Some idea to speed this up could be;
- - Have the opened repos in the session cached.
- - Run operations in parallel.
- - Load up key areas one at a time.
 
 
 ## Tasks
@@ -13,6 +8,7 @@ Some idea to speed this up could be;
 
 
 ## In Test
+Work on performance. This application seems to be runnning rather slowly doing most tasks. (Set GITTREE_TRACE=1 to log timings to <userData>/trace.log.)
 Add in a search to the repo drop down.
 Occasionally getting errors like git lock. Having to manually resolve with reselecting the stage button. If that message is returned, just go ahead and replay the command automatically.
 For stashes, the stash name shouldn't be cut off. Instead the branch stashed from should be cut short.

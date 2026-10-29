@@ -169,3 +169,29 @@ export function setSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
   settingsQueue = run.catch(() => undefined)
   return run
 }
+
+function repoCacheFile(): string {
+  return join(app.getPath('userData'), 'repo-cache.json')
+}
+
+/** The renderer's saved repository snapshots, opaque to main. */
+export async function loadRepoCache(): Promise<unknown> {
+  try {
+    return JSON.parse(await fs.readFile(repoCacheFile(), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+let repoCacheQueue: Promise<unknown> = Promise.resolve()
+
+export function saveRepoCache(data: unknown): Promise<void> {
+  const run = repoCacheQueue.then(async () => {
+    // Written aside then renamed, so a crash mid-write never leaves a torn file.
+    const tmp = repoCacheFile() + '.tmp'
+    await fs.writeFile(tmp, JSON.stringify(data), 'utf8')
+    await fs.rename(tmp, repoCacheFile())
+  })
+  repoCacheQueue = run.catch(() => undefined)
+  return run
+}

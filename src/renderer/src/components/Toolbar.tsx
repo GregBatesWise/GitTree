@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { useStore } from '../store'
 import { Modal } from './Dialog'
 import { GroupCheckoutDialog } from './GroupCheckoutDialog'
+import { GroupCleanDialog } from './GroupCleanDialog'
 import { GroupPicker } from './GroupPicker'
 import { GroupsDialog } from './GroupsDialog'
 import { RepoPicker } from './RepoPicker'
@@ -207,6 +208,7 @@ export function Toolbar() {
   const [stashOpen, setStashOpen] = useState(false)
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [checkoutOpen, setCheckoutOpen] = useState(false)
+  const [cleanOpen, setCleanOpen] = useState(false)
 
   const activeGroup = groups.find((g) => g.id === activeGroupId) ?? null
   const hasRepo = !!active
@@ -236,6 +238,14 @@ export function Toolbar() {
           label="Checkout branches"
           onClick={() => setCheckoutOpen(true)}
           title={`Check out an existing branch in every repository in "${activeGroup.name}"`}
+        />
+      )}
+      {activeGroup && (
+        <TBtn
+          icon="☑"
+          label="Check clean"
+          onClick={() => setCleanOpen(true)}
+          title={`Confirm every repository in "${activeGroup.name}" has no local changes and nothing unpushed`}
         />
       )}
       <TBtn
@@ -327,6 +337,9 @@ export function Toolbar() {
       {groupsOpen && <GroupsDialog onClose={() => setGroupsOpen(false)} />}
       {checkoutOpen && activeGroup && (
         <GroupCheckoutDialog group={activeGroup} onClose={() => setCheckoutOpen(false)} />
+      )}
+      {cleanOpen && activeGroup && (
+        <GroupCleanDialog group={activeGroup} onClose={() => setCleanOpen(false)} />
       )}
     </div>
   )

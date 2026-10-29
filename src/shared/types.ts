@@ -73,12 +73,14 @@ export interface StatusResult {
   unstaged: FileChange[]
 }
 
-/** Everything a full repository refresh shows (bar submodules, loaded separately). */
+/** Everything a full repository refresh shows (bar status and submodules, loaded separately). */
 export interface RepoSnapshot {
-  status: StatusResult | null
   /** The ref `commits` was read for; '' means all branches. */
   historyBranch: string
-  commits: CommitInfo[]
+  /** Null when unchanged from the caller's `knownLogKey`. */
+  commits: CommitInfo[] | null
+  /** Identifies `commits`; '' when it can't be reused. */
+  logKey: string
   branches: BranchInfo[]
   stashes: StashInfo[]
   remotes: RemoteInfo[]

@@ -57,6 +57,8 @@ const api = {
     branch: string
   ): Promise<GitResult<GroupRepoResult[]>> =>
     ipcRenderer.invoke(CH.groupCheckoutCheck, paths, branch),
+  checkGroupClean: (paths: string[]): Promise<GitResult<GroupRepoResult[]>> =>
+    ipcRenderer.invoke(CH.groupCleanCheck, paths),
   checkoutGroupBranch: (
     paths: string[],
     branch: string
@@ -65,6 +67,8 @@ const api = {
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke(CH.settingsGet),
   setSettings: (patch: Partial<AppSettings>): Promise<AppSettings> =>
     ipcRenderer.invoke(CH.settingsSet, patch),
+  loadRepoCache: (): Promise<unknown> => ipcRenderer.invoke(CH.repoCacheLoad),
+  saveRepoCache: (data: unknown): Promise<void> => ipcRenderer.invoke(CH.repoCacheSave, data),
   openFolder: (): Promise<string | null> => ipcRenderer.invoke(CH.openFolder),
   revealInFileManager: (p: string): Promise<GitResult> =>
     ipcRenderer.invoke(CH.revealInFileManager, p),
@@ -76,8 +80,10 @@ const api = {
   snapshot: (
     p: string,
     ref: string | undefined,
-    followHead: boolean
-  ): Promise<GitResult<RepoSnapshot>> => ipcRenderer.invoke(CH.snapshot, p, ref, followHead),
+    followHead: boolean,
+    knownLogKey?: string
+  ): Promise<GitResult<RepoSnapshot>> =>
+    ipcRenderer.invoke(CH.snapshot, p, ref, followHead, knownLogKey),
   log: (p: string, limit?: number, ref?: string): Promise<GitResult<CommitInfo[]>> =>
     ipcRenderer.invoke(CH.log, p, limit, ref),
   searchLog: (p: string, query: string): Promise<GitResult<CommitInfo[]>> =>

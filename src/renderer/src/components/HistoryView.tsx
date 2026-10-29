@@ -1,4 +1,13 @@
-import { memo, useCallback, useMemo, useState, type MouseEvent } from 'react'
+import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type UIEvent
+} from 'react'
 import { useStore } from '../store'
 import { buildGraph, LANE_COLORS, type GraphRow } from '../lib/graph'
 import { fullDate, relativeTime, shortDateTime } from '../lib/format'
@@ -11,6 +20,9 @@ import type { CommitDetail, CommitInfo, CompareDetail, FileChange, ResetMode } f
 const ROW_H = 32
 const LANE_W = 14
 const NODE_R = 4.5
+// Rows rendered beyond the visible ones, and how far scrolling goes before re-rendering.
+const OVERSCAN = 20
+const SCROLL_STEP_ROWS = 5
 
 function GraphCell({ row, width }: { row: GraphRow; width: number }) {
   const cx = (c: number): number => c * LANE_W + LANE_W / 2
@@ -361,6 +373,31 @@ export function HistoryView() {
     [rows]
   )
 
+  // Only rows near the viewport are rendered; spacers stand in for the rest.
+  const tbodyRef = useRef<HTMLTableSectionElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  // Row pitch including the collapsed border, measured once rows exist.
+  const [rowH, setRowH] = useState(ROW_H + 1)
+  useLayoutEffect(() => {
+    const a = tbodyRef.current?.querySelector<HTMLElement>('tr.commit-row')
+    const b = a?.nextElementSibling as HTMLElement | null
+    if (!a || !b?.classList.contains('commit-row')) return
+    const h = b.offsetTop - a.offsetTop
+    if (h > 0 && h !== rowH) setRowH(h)
+  })
+  const onListScroll = useCallback(
+    (e: UIEvent<HTMLDivElement>) => {
+      const step = rowH * SCROLL_STEP_ROWS
+      setScrollTop(Math.floor(e.currentTarget.scrollTop / step) * step)
+    },
+    [rowH]
+  )
+  const first = Math.max(0, Math.floor(scrollTop / rowH) - OVERSCAN)
+  const last = Math.min(
+    filtered.length,
+    Math.ceil((scrollTop + listHeight) / rowH) + SCROLL_STEP_ROWS + OVERSCAN
+  )
+
   const commitMenu = (hash: string): MenuItem[] => {
     const short = hash.slice(0, 7)
     return [
@@ -463,7 +500,11 @@ export function HistoryView() {
           )}
         </select>
       </div>
-      <div className="commit-scroll" style={{ flex: 'none', height: listHeight }}>
+      <div
+        className="commit-scroll"
+        style={{ flex: 'none', height: listHeight }}
+        onScroll={onListScroll}
+      >
         {filtered.length ? (
           <table className="commit-table">
             <colgroup>
@@ -509,12 +550,13 @@ export function HistoryView() {
                 </th>
               </tr>
             </thead>
-            <tbody>
-              {filtered.map((c, i) => (
+            <tbody ref={tbodyRef}>
+              {first > 0 && <tr aria-hidden style={{ height: first * rowH }} />}
+              {filtered.slice(first, last).map((c, j) => (
                 <CommitRow
                   key={c.hash}
                   c={c}
-                  row={rows[i]}
+                  row={rows[first + j]}
                   graphWidth={graphWidth}
                   selected={c.hash === selected}
                   compare={c.hash === compareCommit}
@@ -522,6 +564,9 @@ export function HistoryView() {
                   onRowMenu={onRowMenu}
                 />
               ))}
+              {last < filtered.length && (
+                <tr aria-hidden style={{ height: (filtered.length - last) * rowH }} />
+              )}
             </tbody>
           </table>
         ) : (
